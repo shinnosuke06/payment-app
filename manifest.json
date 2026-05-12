@@ -3,12 +3,12 @@
   "short_name": "支払管理",
   "icons": [
     {
-      "src": "money.png",
+      "src": "bank.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "money.png",
+      "src": "bank.png",
       "sizes": "512x512",
       "type": "image/png"
     }
