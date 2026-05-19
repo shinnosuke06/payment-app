@@ -167,12 +167,23 @@
             useEffect(() => { localStorage.setItem('mpm_v7_payments', JSON.stringify(payments)); }, [payments]);
             useEffect(() => { localStorage.setItem('mpm_v7_history', JSON.stringify(history)); }, [history]);
 
+            // --- 計算処理（二重計上防止のアップデート） ---
             const totalAccounts = useMemo(() => accounts.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [accounts]);
+            
+            // 口座に設定された「入金予定」の合計
             const totalAccountIncomes = useMemo(() => accounts.reduce((sum, item) => sum + (Number(item.incomingAmount) || 0), 0), [accounts]);
-            const totalIncomes = useMemo(() => incomes.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [incomes]);
+            
+            // 「入金・預かり予定」リストの合計金額（全体の入金予定）
+            const totalIncomesList = useMemo(() => incomes.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [incomes]);
+            
+            // 「入金・預かり予定」から、すでに口座に割り当てた分を引いた残額
+            const remainingIncomes = totalIncomesList - totalAccountIncomes;
             
             const totalPayments = useMemo(() => payments.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [payments]);
-            const finalBalance = totalAccounts + totalAccountIncomes + totalIncomes - totalPayments;
+            
+            // 全体のキャッシュフローは「今ある口座残高」＋「リストにある全ての入金予定」ー「支払い合計」
+            // ※口座に割り当てた入金予定は totalIncomesList の内数という扱いにするため、二重に足さない
+            const finalBalance = totalAccounts + totalIncomesList - totalPayments;
             const isShortage = finalBalance < 0;
 
             const handleAddAccount = (e) => {
@@ -297,7 +308,6 @@
                 setShowHistorySavedModal(true);
             };
 
-            // バックアップテキスト生成処理を共通化
             const safeMemo = (memo) => (memo || '').replace(/,/g, '，').replace(/\n/g, ' ');
             const generateExportText = () => {
                 let text = "---支払い管理バックアップ---\n\n";
@@ -319,7 +329,6 @@
                 return text;
             };
 
-            // テキストエリアへの出力
             const handleGenerateExport = () => {
                 try {
                     const text = generateExportText();
@@ -331,7 +340,6 @@
                 }
             };
 
-            // ファイルとしてダウンロード保存
             const handleDownloadExport = () => {
                 try {
                     const text = generateExportText();
@@ -339,13 +347,11 @@
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    
                     const date = new Date();
                     const y = date.getFullYear();
                     const m = String(date.getMonth() + 1).padStart(2, '0');
                     const d = String(date.getDate()).padStart(2, '0');
                     a.download = `payment_backup_${y}${m}${d}.txt`;
-                    
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
@@ -356,7 +362,6 @@
                 }
             };
 
-            // クリップボードへのコピー
             const handleCopy = () => {
                 if (!exportData) return;
                 const fallbackCopy = () => {
@@ -375,7 +380,6 @@
                 }
             };
 
-            // ファイルからの読み込み
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -388,11 +392,9 @@
                     setImportMsg({ text: 'ファイルの読み込みに失敗しました。', isError: true });
                 };
                 reader.readAsText(file);
-                // 同じファイルを再選択できるようにリセット
                 e.target.value = null;
             };
 
-            // インポート（復元）前のチェック
             const handleImportClick = () => {
                 if (!importData.trim()) {
                     setImportMsg({ text: 'テキストを入力するか、ファイルを選択してください。', isError: true });
@@ -423,11 +425,8 @@
                             let incAmt = 0;
                             let memoText = '';
                             if (parts.length === 4) {
-                                if (parts[3] !== '' && !isNaN(parts[3])) {
-                                    incAmt = Number(parts[3]);
-                                } else {
-                                    memoText = parts[3] || '';
-                                }
+                                if (parts[3] !== '' && !isNaN(parts[3])) { incAmt = Number(parts[3]); } 
+                                else { memoText = parts[3] || ''; }
                             } else if (parts.length >= 5) {
                                 incAmt = Number(parts[3]);
                                 memoText = parts.slice(4).join(',') || '';
@@ -438,16 +437,12 @@
                         } else if (mode === '【支払い】') {
                             if (line.startsWith('>') && currentPayment && parts.length >= 5) {
                                 const subId = Number(parts[0].substring(1));
-                                currentPayment.subItems.push({
-                                    id: subId, name: parts[1], amount: Number(parts[2]), isFixed: parts[3] === '1', endDate: parts[4] || '', memo: parts[5] || ''
-                                });
+                                currentPayment.subItems.push({ id: subId, name: parts[1], amount: Number(parts[2]), isFixed: parts[3] === '1', endDate: parts[4] || '', memo: parts[5] || '' });
                             } else if (parts.length >= 5) {
                                 currentPayment = {
                                     id: Number(parts[0]), name: parts[1], amount: Number(parts[2]),
                                     dueDate: parts[3] ? Number(parts[3]) : null,
-                                    accountId: parts[4] ? Number(parts[4]) : '',
-                                    memo: parts[5] || '',
-                                    subItems: []
+                                    accountId: parts[4] ? Number(parts[4]) : '', memo: parts[5] || '', subItems: []
                                 };
                                 newPayments.push(currentPayment);
                             }
@@ -701,7 +696,13 @@
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                     {/* 入金セクション */}
                                     <div className="rounded-xl p-5 shadow-sm border bg-emerald-50/30 border-emerald-100">
-                                        <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-bold flex items-center gap-2 text-emerald-600"><Icon name="arrow-down-to-line" size={24} />入金・預かり予定</h3><span className="font-bold text-lg">{formatCurrency(totalIncomes)}</span></div>
+                                        <div className="flex items-start sm:items-center justify-between mb-4 gap-2 flex-wrap">
+                                            <h3 className="text-lg font-bold flex items-center gap-2 text-emerald-600 shrink-0"><Icon name="arrow-down-to-line" size={24} />入金・預かり</h3>
+                                            <div className="text-right">
+                                                {totalAccountIncomes > 0 && <span className="text-[10px] sm:text-xs text-emerald-600 font-bold block mb-0.5">口座割当済: -{formatCurrency(totalAccountIncomes)}</span>}
+                                                <span className="font-bold text-lg">{formatCurrency(remainingIncomes)}</span>
+                                            </div>
+                                        </div>
                                         {incomes.length > 0 ? (
                                             <div className="space-y-2 mb-4">
                                                 {incomes.map((item, index) => {
@@ -917,7 +918,7 @@
                             <div className="bg-white rounded-2xl p-8 shadow-md border border-gray-100 animate-zoom-in">
                                 <h2 className="text-xl font-bold text-gray-800 mb-8 flex items-center gap-2 pb-4 border-b border-gray-100"><Icon name="layout-dashboard" className="text-indigo-600" />今月の全体キャッシュフロー予想</h2>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="p-6 bg-blue-50 rounded-2xl border border-blue-100 flex flex-col justify-between"><div><p className="text-sm text-blue-600 font-bold mb-1">確保資金</p><p className="text-xs text-blue-400 mb-4">口座残高 + 各種入金予定</p></div><p className="text-3xl font-black text-blue-800">{formatCurrency(totalAccounts + totalAccountIncomes + totalIncomes)}</p></div>
+                                    <div className="p-6 bg-blue-50 rounded-2xl border border-blue-100 flex flex-col justify-between"><div><p className="text-sm text-blue-600 font-bold mb-1">確保資金</p><p className="text-xs text-blue-400 mb-4">全口座残高 + 全入金予定</p></div><p className="text-3xl font-black text-blue-800">{formatCurrency(totalAccounts + totalIncomesList)}</p></div>
                                     <div className="p-6 bg-rose-50 rounded-2xl border border-rose-100 flex flex-col justify-between"><div><p className="text-sm text-rose-600 font-bold mb-1">必要な支払い合計</p><p className="text-xs text-rose-400 mb-4">すべての引落・ローン等</p></div><p className="text-3xl font-black text-rose-800">{formatCurrency(totalPayments)}</p></div>
                                     <div className={`p-6 rounded-2xl border-2 flex flex-col justify-between ${isShortage ? 'bg-red-50 border-red-300' : 'bg-emerald-50 border-emerald-300 shadow-emerald-100 shadow-lg'}`}><div><p className={`text-sm font-bold flex items-center gap-1.5 mb-1 ${isShortage ? 'text-red-600' : 'text-emerald-700'}`}>{isShortage ? <Icon name="alert-circle" size={24} /> : <Icon name="check-circle-2" size={24} />}予測残高</p><p className={`text-xs mb-4 ${isShortage ? 'text-red-400' : 'text-emerald-500'}`}>{isShortage ? '資金が不足しています' : '無事に完了する見込みです'}</p></div><p className={`text-4xl font-black tracking-tight ${isShortage ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(finalBalance)}</p></div>
                                 </div>
@@ -959,7 +960,6 @@
                             <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100 animate-zoom-in">
                                 <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2 pb-4 border-b border-gray-100"><Icon name="settings" className="text-gray-600" />データのバックアップ・復元</h2>
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                    {/* エクスポート領域 */}
                                     <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100">
                                         <h3 className="text-lg font-bold text-blue-800 mb-2 flex items-center gap-2"><Icon name="download" size={24} /> バックアップの発行</h3>
                                         <p className="text-sm text-gray-600 mb-4">現在のデータを保存します。ファイルとしてダウンロードするか、テキストをコピーして保管してください。</p>
@@ -983,12 +983,10 @@
                                         )}
                                     </div>
                                     
-                                    {/* インポート領域 */}
                                     <div className="bg-emerald-50/50 p-5 rounded-xl border border-emerald-100 flex flex-col">
                                         <h3 className="text-lg font-bold text-emerald-800 mb-2 flex items-center gap-2"><Icon name="upload" size={24} /> データの復元</h3>
                                         <p className="text-sm text-gray-600 mb-4">保存したバックアップファイルを選択するか、テキストを下の枠に貼り付けてください。</p>
                                         
-                                        {/* ファイル選択ボタン */}
                                         <div className="mb-4">
                                             <label className="flex flex-col sm:flex-row items-center justify-center gap-2 w-full bg-white border-2 border-dashed border-emerald-400 rounded-lg p-4 cursor-pointer hover:bg-emerald-50 transition-colors">
                                                 <Icon name="file-text" size={28} className="text-emerald-500" />
