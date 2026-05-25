@@ -12,15 +12,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>毎月の支払い管理</title>
     
-    <!-- Reactの読み込み -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Tailwind CSS (デザイン用) -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Google Material Symbols (安定したアイコンシステム) -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
 
     <script>
@@ -130,22 +127,22 @@
 
             // --- メインデータ ---
             const [accounts, setAccounts] = useState(() => {
-                const saved = localStorage.getItem('mpm_v8_accounts');
+                const saved = localStorage.getItem('mpm_v9_accounts') || localStorage.getItem('mpm_v8_accounts');
                 return saved ? JSON.parse(saved) : [];
             });
 
             const [incomes, setIncomes] = useState(() => {
-                const saved = localStorage.getItem('mpm_v8_incomes');
+                const saved = localStorage.getItem('mpm_v9_incomes') || localStorage.getItem('mpm_v8_incomes');
                 return saved ? JSON.parse(saved) : [];
             });
 
             const [payments, setPayments] = useState(() => {
-                const saved = localStorage.getItem('mpm_v8_payments');
+                const saved = localStorage.getItem('mpm_v9_payments') || localStorage.getItem('mpm_v8_payments');
                 return saved ? JSON.parse(saved) : [];
             });
 
             const [history, setHistory] = useState(() => {
-                const saved = localStorage.getItem('mpm_v8_history');
+                const saved = localStorage.getItem('mpm_v9_history') || localStorage.getItem('mpm_v8_history');
                 return saved ? JSON.parse(saved) : [];
             });
 
@@ -181,8 +178,6 @@
             
             // 口座入金予定の合計（未済のもののみ）
             const activeAccountIncomes = useMemo(() => accounts.reduce((sum, item) => sum + (item.isIncomingDone ? 0 : (Number(item.incomingAmount) || 0)), 0), [accounts]);
-            // 口座入金予定の総計（済・未済すべて：推移用）
-            const totalAccountIncomes = useMemo(() => accounts.reduce((sum, item) => sum + (Number(item.incomingAmount) || 0), 0), [accounts]);
             
             // 入金リストの合計（未済のもののみ）
             const activeIncomesList = useMemo(() => incomes.reduce((sum, item) => sum + (item.isDone ? 0 : (Number(item.amount) || 0)), 0), [incomes]);
@@ -206,18 +201,17 @@
             // --- 月替わりの自動保存＆一括リセット処理 ---
             useEffect(() => {
                 const currentMonth = getCurrentMonthStr();
-                const lastOpenedMonth = localStorage.getItem('mpm_v8_last_opened_month');
+                const lastOpenedMonth = localStorage.getItem('mpm_v9_last_opened_month');
                 
                 if (lastOpenedMonth && lastOpenedMonth !== currentMonth) {
-                    // 1. 前月分を自動保存（まだ履歴にない場合のみ、または上書き）
-                    const existingHistory = JSON.parse(localStorage.getItem('mpm_v8_history') || '[]');
+                    // 1. 前月分を自動保存
+                    const existingHistory = JSON.parse(localStorage.getItem('mpm_v9_history') || '[]');
                     const hasRecord = existingHistory.some(h => h.id === lastOpenedMonth);
                     
                     if (!hasRecord) {
                         const [y, m] = lastOpenedMonth.split('-');
                         const label = `${y.slice(2)}年${parseInt(m, 10)}月`;
                         
-                        // その時点の総集計データでレコード作成
                         const autoRecord = {
                             id: lastOpenedMonth,
                             label,
@@ -226,7 +220,7 @@
                         };
                         const updatedHistory = [...existingHistory, autoRecord].sort((a, b) => a.id.localeCompare(b.id));
                         setHistory(updatedHistory);
-                        localStorage.setItem('mpm_v8_history', JSON.stringify(updatedHistory));
+                        localStorage.setItem('mpm_v9_history', JSON.stringify(updatedHistory));
                         setShowAutoSaveModal(true);
                     }
                     
@@ -234,22 +228,19 @@
                     executeMonthlyReset();
                 }
                 
-                localStorage.setItem('mpm_v8_last_opened_month', currentMonth);
+                localStorage.setItem('mpm_v9_last_opened_month', currentMonth);
             }, []);
 
             // 一括リセットの具体的な処理
             const executeMonthlyReset = () => {
-                // 口座：入金予定額を空欄(0)に、済マーク解除
-                setAccounts(prev => prev.map(a => ({ ...a, incomingAmount: 0, isIncomingDone: false })));
+                setAccounts(prev => prev.map(a => ({ ...a, incomingAmount: '', isIncomingDone: false })));
                 
-                // 入金予定：固定費以外は金額を空欄(0)に、済マーク解除
                 setIncomes(prev => prev.map(i => ({ 
                     ...i, 
                     amount: i.isFixed ? i.amount : '', 
                     isDone: false 
                 })));
                 
-                // 支払い：固定費以外は金額を空欄(0)に、済マーク解除。内訳も同様
                 setPayments(prev => prev.map(p => ({
                     ...p,
                     amount: p.isFixed ? p.amount : '',
@@ -270,10 +261,10 @@
             };
 
             // --- データの同期保存 ---
-            useEffect(() => { localStorage.setItem('mpm_v8_accounts', JSON.stringify(accounts)); }, [accounts]);
-            useEffect(() => { localStorage.setItem('mpm_v8_incomes', JSON.stringify(incomes)); }, [incomes]);
-            useEffect(() => { localStorage.setItem('mpm_v8_payments', JSON.stringify(payments)); }, [payments]);
-            useEffect(() => { localStorage.setItem('mpm_v8_history', JSON.stringify(history)); }, [history]);
+            useEffect(() => { localStorage.setItem('mpm_v9_accounts', JSON.stringify(accounts)); }, [accounts]);
+            useEffect(() => { localStorage.setItem('mpm_v9_incomes', JSON.stringify(incomes)); }, [incomes]);
+            useEffect(() => { localStorage.setItem('mpm_v9_payments', JSON.stringify(payments)); }, [payments]);
+            useEffect(() => { localStorage.setItem('mpm_v9_history', JSON.stringify(history)); }, [history]);
 
             // --- 追加ハンドラ ---
             const handleAddAccount = (e) => {
@@ -335,6 +326,12 @@
             };
 
             // --- 削除・チェック状態ハンドラ ---
+            const toggleExpand = (id) => {
+                const newSet = new Set(expandedPayIds);
+                if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
+                setExpandedPayIds(newSet);
+            };
+
             const handleDeleteSubItem = (paymentId, subItemId) => {
                 setPayments(payments.map(p => p.id === paymentId ? { ...p, subItems: (p.subItems || []).filter(s => s.id !== subItemId) } : p));
             };
@@ -353,7 +350,6 @@
                 setDeleteTarget(null);
             };
 
-            // 各種の【済】切り替え
             const toggleAccountIncomingDone = (id, e) => {
                 e.stopPropagation();
                 setAccounts(accounts.map(a => a.id === id ? { ...a, isIncomingDone: !a.isIncomingDone } : a));
@@ -368,11 +364,19 @@
             };
 
             // --- 並び替え ---
-            const handleMoveItem = (list, index, direction, setList, type) => {
-                moveItem(list, index, direction, setList);
+            const handleMoveItem = (list, index, direction, setList) => {
+                const newIndex = index + direction;
+                if (newIndex < 0 || newIndex >= list.length) return;
+                const newItems = [...list];
+                [newItems[index], newItems[newIndex]] = [newItems[newIndex], newItems[index]];
+                setList(newItems);
             };
 
             // --- 編集処理 ---
+            const startEdit = (type, item, extraProps = {}) => {
+                setEditMode({ type, ...item, ...extraProps });
+            };
+
             const saveEdit = (e) => {
                 if (e) e.preventDefault();
                 if (!editMode || !editMode.name) return;
@@ -404,7 +408,7 @@
                 setEditMode(null);
             };
 
-            // --- グラフ（履歴）手動保存・上書き・編集処理 ---
+            // --- グラフ（履歴）編集処理 ---
             const handleSaveHistoryManual = () => {
                 if (!saveMonthStr) return;
                 const [year, month] = saveMonthStr.split('-');
@@ -415,7 +419,6 @@
                 setShowHistorySavedModal(true);
             };
 
-            // 任意の過去月（前月末など）として今の状態を保存するボタン用
             const handleSaveAsPreviousMonth = () => {
                 if (!manualHistoryMonth) return;
                 const [year, month] = manualHistoryMonth.split('-');
@@ -426,7 +429,6 @@
                 alert(`${label}のデータとして現在の状態を保存しました。`);
             };
 
-            // 履歴データ自体の手入力直接書き換え
             const handleSaveHistoryEdit = (e) => {
                 e.preventDefault();
                 if (!historyEditMode) return;
@@ -445,40 +447,30 @@
             };
 
             // --- バックアップ処理 ---
+            const safeMemo = (memo) => (memo || '').replace(/,/g, '，').replace(/\n/g, ' ');
+            const generateExportText = () => {
+                let text = "---支払い管理バックアップ---\n\n";
+                text += "【口座】\n";
+                accounts.forEach(a => text += `${a.id},${a.name},${a.amount || 0},${a.incomingAmount || 0},${a.isIncomingDone ? 1 : 0},${safeMemo(a.memo)}\n`);
+                text += "\n【入金】\n";
+                incomes.forEach(i => text += `${i.id},${i.name},${i.amount || 0},${i.isFixed ? 1 : 0},${i.isDone ? 1 : 0},${safeMemo(i.memo)}\n`);
+                text += "\n【支払い】\n";
+                payments.forEach(p => {
+                    text += `${p.id},${p.name},${p.amount || 0},${p.dueDate || ''},${p.accountId || ''},${p.isFixed ? 1 : 0},${p.isDone ? 1 : 0},${safeMemo(p.memo)}\n`;
+                    if (p.subItems && p.subItems.length > 0) {
+                        p.subItems.forEach(s => {
+                            text += `>${s.id},${s.name},${s.amount || 0},${s.isFixed ? 1 : 0},${s.endDate || ''},${safeMemo(s.memo)}\n`;
+                        });
+                    }
+                });
+                text += "\n【履歴】\n";
+                history.forEach(h => text += `${h.id},${h.label},${h.payment},${h.balance}\n`);
+                return text;
+            };
+
             const handleGenerateExport = () => {
                 try {
-                    let text = "---支払い管理バックアップ---
-
-";
-                    text += "【口座】
-";
-                    accounts.forEach(a => text += `${a.id},${a.name},${a.amount || 0},${a.incomingAmount || 0},${a.isIncomingDone ? 1 : 0},${safeMemo(a.memo)}
-`);
-                    text += "
-【入金】
-";
-                    incomes.forEach(i => text += `${i.id},${i.name},${i.amount || 0},${i.isFixed ? 1 : 0},${i.isDone ? 1 : 0},${safeMemo(i.memo)}
-`);
-                    text += "
-【支払い】
-";
-                    payments.forEach(p => {
-                        text += `${p.id},${p.name},${p.amount || 0},${p.dueDate || ''},${p.accountId || ''},${p.isFixed ? 1 : 0},${p.isDone ? 1 : 0},${safeMemo(p.memo)}
-`;
-                        if (p.subItems && p.subItems.length > 0) {
-                            p.subItems.forEach(s => {
-                                text += `>${s.id},${s.name},${s.amount || 0},${s.isFixed ? 1 : 0},${s.endDate || ''},${safeMemo(s.memo)}
-`;
-                            });
-                        }
-                    });
-                    text += "
-【履歴】
-";
-                    history.forEach(h => text += `${h.id},${h.label},${h.payment},${h.balance}
-`);
-
-                    setExportData(text);
+                    setExportData(generateExportText());
                     setCopySuccess(false);
                     setImportMsg({ text: '', isError: false });
                 } catch (e) {
@@ -488,9 +480,7 @@
 
             const handleDownloadExport = () => {
                 try {
-                    handleGenerateExport();
-                    const text = generateExportText();
-                    const blob = new Blob([text], { type: 'text/plain' });
+                    const blob = new Blob([generateExportText()], { type: 'text/plain' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
@@ -505,6 +495,36 @@
                 }
             };
 
+            const handleCopy = () => {
+                if (!exportData) return;
+                const fallbackCopy = () => {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = exportData;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    try { document.execCommand('copy'); setCopySuccess(true); setTimeout(() => setCopySuccess(false), 3000); } 
+                    catch (err) { console.error('Copy failed', err); }
+                    document.body.removeChild(textArea);
+                };
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(exportData).then(() => { setCopySuccess(true); setTimeout(() => setCopySuccess(false), 3000); }).catch(fallbackCopy);
+                } else {
+                    fallbackCopy();
+                }
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    setImportData(event.target.result);
+                    setImportMsg({ text: 'ファイルを読み込みました。「復元を実行する」ボタンを押してください。', isError: false });
+                };
+                reader.readAsText(file);
+                e.target.value = null;
+            };
+
             const handleImportClick = () => {
                 if (!importData.trim()) {
                     setImportMsg({ text: 'データを入力してください。', isError: true });
@@ -512,8 +532,7 @@
                 }
                 try {
                     const fixedText = importData.replace(/，/g, ',').replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-                    const lines = fixedText.split('
-');
+                    const lines = fixedText.split('\n');
                     let mode = '';
                     const newAccounts = [], newIncomes = [], newPayments = [], newHistory = [];
                     let currentPayment = null;
@@ -558,6 +577,28 @@
                     setImportMsg({ text: 'データの解析に失敗しました。', isError: true });
                 }
             };
+
+            const executeImport = () => {
+                if (!confirmImportData) return;
+                setAccounts(confirmImportData.accounts);
+                setIncomes(confirmImportData.incomes);
+                setPayments(confirmImportData.payments);
+                if (confirmImportData.history) setHistory(confirmImportData.history);
+                setImportData('');
+                setConfirmImportData(null);
+                setShowSuccessModal(true);
+            };
+
+            const SortButtons = ({ onMoveUp, onMoveDown, isFirst, isLast }) => (
+                <div className="flex flex-col mr-2 items-center justify-center shrink-0">
+                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMoveUp(); }} disabled={isFirst} className={`p-1.5 rounded transition-colors ${isFirst ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'}`}>
+                        <Icon name="chevron-up" size={20} />
+                    </button>
+                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMoveDown(); }} disabled={isLast} className={`p-1.5 rounded transition-colors ${isLast ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'}`}>
+                        <Icon name="chevron-down" size={20} />
+                    </button>
+                </div>
+            );
 
             return (
                 <div className="min-h-screen p-4 md:p-8">
@@ -667,7 +708,7 @@
                                 <button onClick={() => setActiveTab('dashboard')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="wallet" size={20} /> 口座・支払い</button>
                                 <button onClick={() => setActiveTab('cashflow')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'cashflow' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="layout-dashboard" size={20} /> キャッシュフロー</button>
                                 <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'history' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="bar-chart-3" size={20} /> 推移グラフ</button>
-                                <button onClick={() => setActiveTab('settings')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="settings" size={20} /> バックアップ・リセット</button>
+                                <button onClick={() => setActiveTab('settings')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="settings" size={20} /> バックアップ・設定</button>
                             </div>
                         </div>
 
@@ -793,7 +834,7 @@
                                                             <div key={item.id} className="bg-emerald-50/80 rounded-xl shadow-inner border border-emerald-200 p-3 flex flex-col gap-3 animate-fade-in">
                                                                 <div className="flex flex-col sm:flex-row gap-2">
                                                                     <input type="text" value={editMode.name || ''} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300 outline-none" placeholder="項目名" />
-                                                                    <input type="number" value={editMode.amount} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="flex-1 sm:w-28 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300 outline-none" placeholder="金額" />
+                                                                    <input type="number" value={editMode.amount || ''} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="flex-1 sm:w-28 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300 outline-none" placeholder="金額" />
                                                                 </div>
                                                                 <div className="flex items-center gap-4 text-sm">
                                                                     <label className="flex items-center gap-1 font-bold text-emerald-800 cursor-pointer"><input type="checkbox" checked={editMode.isFixed || false} onChange={e=>setEditMode({...editMode, isFixed: e.target.checked})} className="w-4 h-4 rounded text-emerald-600"/>固定の入金予定</label>
@@ -821,17 +862,7 @@
                                                             </div>
                                                             <div className="flex items-center gap-1 shrink-0">
                                                                 <span className={`font-bold mr-1 ${item.isDone ? 'text-gray-400' : 'text-gray-800'}`}>{formatCurrency(item.amount)}</span>
-                                                                
-                                                                {/* 【済】ボタン */}
-                                                                <button 
-                                                                    type="button" 
-                                                                    onClick={() => toggleIncomeDone(item.id)} 
-                                                                    className={`p-1 rounded transition-colors ${item.isDone ? 'bg-emerald-100 text-emerald-700' : 'text-gray-300 hover:text-emerald-600 hover:bg-gray-50'}`}
-                                                                    title={item.isDone ? '未済に戻す' : '入金済みにする'}
-                                                                >
-                                                                    <Icon name={item.isDone ? 'check-circle-2' : 'done'} size={20} />
-                                                                </button>
-                                                                
+                                                                <button type="button" onClick={() => toggleIncomeDone(item.id)} className={`p-1 rounded transition-colors ${item.isDone ? 'bg-emerald-100 text-emerald-700' : 'text-gray-300 hover:text-emerald-600 hover:bg-gray-50'}`} title={item.isDone ? '未済に戻す' : '入金済みにする'}><Icon name={item.isDone ? 'check-circle-2' : 'done'} size={20} /></button>
                                                                 <button type="button" onClick={() => startEdit('income', item)} className="text-gray-300 hover:text-blue-500 p-1 transition-colors"><Icon name="pencil" size={18} /></button>
                                                                 <button type="button" onClick={() => requestDelete('income', item)} className="text-gray-300 hover:text-red-500 p-1 transition-colors"><Icon name="trash-2" size={18} /></button>
                                                             </div>
@@ -882,7 +913,7 @@
                                                                     <input type="number" min="1" max="31" value={editMode.dueDate || ''} onChange={e=>setEditMode({...editMode, dueDate: e.target.value})} className="w-full sm:w-24 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-300 outline-none" placeholder="引落日" />
                                                                 </div>
                                                                 <div className="flex items-center gap-4 text-sm">
-                                                                    <label className="flex items-center gap-1 font-bold text-rose-800 cursor-pointer"><input type="checkbox" checked={editMode.isFixed || false} onChange={e=>setEditMode({...editMode, isFixed: e.target.checked})} className="w-4 h-4 rounded text-rose-600"/>固定費 (毎月額が変わらないローンや分割など)</label>
+                                                                    <label className="flex items-center gap-1 font-bold text-rose-800 cursor-pointer"><input type="checkbox" checked={editMode.isFixed || false} onChange={e=>setEditMode({...editMode, isFixed: e.target.checked})} className="w-4 h-4 rounded text-rose-600"/>固定費設定</label>
                                                                 </div>
                                                                 <input type="text" value={editMode.memo || ''} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-300 outline-none" placeholder="メモ（任意）" />
                                                                 <div className="flex justify-end gap-2 mt-1">
@@ -919,15 +950,7 @@
                                                                 <div className="flex flex-col items-end gap-1.5 ml-1 shrink-0">
                                                                     <span className={`font-bold text-[15px] break-words ${item.isDone ? 'text-gray-400' : 'text-gray-800'}`}>{formatCurrency(item.amount)}</span>
                                                                     <div className="flex items-center gap-1">
-                                                                        {/* 【済】ボタン */}
-                                                                        <button 
-                                                                            type="button" 
-                                                                            onClick={() => togglePaymentDone(item.id)} 
-                                                                            className={`p-1 rounded transition-colors ${item.isDone ? 'bg-rose-100 text-rose-700' : 'text-gray-300 hover:text-rose-600 hover:bg-gray-50'}`}
-                                                                            title={item.isDone ? '未引落に戻す' : '引落済みにする'}
-                                                                        >
-                                                                            <Icon name={item.isDone ? 'check-circle-2' : 'done'} size={20} />
-                                                                        </button>
+                                                                        <button type="button" onClick={() => togglePaymentDone(item.id)} className={`p-1 rounded transition-colors ${item.isDone ? 'bg-rose-100 text-rose-700' : 'text-gray-300 hover:text-rose-600 hover:bg-gray-50'}`} title={item.isDone ? '未引落に戻す' : '引落済みにする'}><Icon name={item.isDone ? 'check-circle-2' : 'done'} size={20} /></button>
                                                                         <button type="button" onClick={() => startEdit('payment', item)} className="text-gray-300 hover:text-blue-500 p-1 transition-colors"><Icon name="pencil" size={18} /></button>
                                                                         <button type="button" onClick={() => requestDelete('payment', item)} className="text-gray-300 hover:text-red-500 p-1 transition-colors"><Icon name="trash-2" size={18} /></button>
                                                                     </div>
@@ -986,7 +1009,7 @@
                                                                         {(() => {
                                                                             const subTotal = (item.subItems || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
                                                                             const diff = (Number(item.amount) || 0) - subTotal;
-                                                                            return (<div className="flex justify-between items-center border-t border-gray-100 pt-2 text-xs font-bold"><span className="text-gray-400">その他（カードの変動費等分）</span><span className={`font-bold ${diff < 0 ? 'text-red-500' : 'text-gray-600'}`}>{formatCurrency(diff)}</span></div>);
+                                                                            return (<div className="flex justify-between items-center border-t border-gray-100 pt-2 text-xs font-bold"><span className="text-gray-400">その他（変動費分）</span><span className={`font-bold ${diff < 0 ? 'text-red-500' : 'text-gray-600'}`}>{formatCurrency(diff)}</span></div>);
                                                                         })()}
                                                                     </div>
                                                                     <form onSubmit={(e) => handleAddSubItem(e, item.id)} className="mt-1 flex flex-col gap-2 bg-white p-3 rounded-lg border border-gray-100">
@@ -1015,7 +1038,7 @@
                                         <form onSubmit={handleAddPayment} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-3">
                                             <p className="text-sm font-bold text-gray-700 flex items-center gap-1"><Icon name="plus" size={20} className="text-rose-500" />新しい支払いを追加</p>
                                             <div className="flex flex-col sm:flex-row gap-3">
-                                                <input type="text" placeholder="項目名 (例: 楽天カード、大信返済)" className="flex-1 px-3 py-2 text-sm border rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-rose-200" value={payName} onChange={e => setPayName(e.target.value)} required />
+                                                <input type="text" placeholder="項目名 (例: 楽天カード)" className="flex-1 px-3 py-2 text-sm border rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-rose-200" value={payName} onChange={e => setPayName(e.target.value)} required />
                                                 <input type="number" placeholder="請求総額" className="flex-1 px-3 py-2 text-sm border rounded-lg w-full sm:max-w-[150px] focus:outline-none focus:ring-2 focus:ring-rose-200" value={payAmount} onChange={e => setPayAmount(e.target.value)} />
                                             </div>
                                             <div className="bg-gray-50 p-3 rounded-lg space-y-3">
@@ -1053,15 +1076,12 @@
                                 <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100">
                                     <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 pb-4 border-b border-gray-100">
                                         <div><h2 className="text-xl font-bold text-gray-800">月次推移グラフ</h2><p className="text-sm text-gray-500">毎月の支払い実績額と、月末最終残高の履歴グラフです。</p></div>
-                                        
-                                        {/* 手動保存・上書きセクション */}
                                         <div className="flex flex-wrap items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100 w-full lg:w-auto">
                                             <div className="text-xs font-bold text-indigo-900 block w-full mb-1">💡 現在の状態を過去データとして手動保存・上書きする</div>
                                             <input type="month" value={manualHistoryMonth} onChange={e => setManualHistoryMonth(e.target.value)} className="text-sm px-2 py-1.5 border rounded bg-white" />
-                                            <button onClick={handleSaveAsPreviousMonth} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center gap-1"><Icon name="save" size={16} /> 指定の月末として保存</button>
+                                            <button onClick={handleSaveAsPreviousMonth} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center gap-1"><Icon name="save" size={16} /> 指定の月として保存</button>
                                         </div>
                                     </div>
-                                    
                                     <div className="h-64 mt-8 flex items-end justify-around gap-2 border-b-2 border-gray-200 pb-2 relative overflow-x-auto hide-scrollbar">
                                         {history.length === 0 ? (<p className="text-gray-400 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">履歴データがまだありません</p>) : (
                                             history.map((data) => {
@@ -1083,10 +1103,8 @@
                                     </div>
                                     <div className="flex justify-center gap-4 mt-6 text-xs text-gray-600 flex-wrap"><span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-400 rounded-sm"></div>支払い総額</span><span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-full"></div>最終残高（黒字）</span><span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-red-500 rounded-full"></div>最終残高（赤字）</span></div>
                                 </div>
-
-                                {/* 履歴データの細かな直接手入力編集エリア */}
                                 <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100">
-                                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Icon name="edit" className="text-gray-500"/> 履歴データの編集・修正（手入力）</h3>
+                                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Icon name="pencil" className="text-gray-500"/> 履歴データの編集・修正（手入力）</h3>
                                     {history.length > 0 ? (
                                         <div className="overflow-x-auto">
                                             <table className="w-full text-sm text-left text-gray-500">
