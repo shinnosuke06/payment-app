@@ -49,22 +49,49 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        const STORAGE_KEY = 'mpm_v11_'; // データ構造変更に伴うキーの更新
+        const STORAGE_KEY = 'mpm_v12_';
 
-        const formatCurrency = (amount) => {
-            if (amount === '' || amount === null || isNaN(amount)) return "¥0";
-            return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY' }).format(amount);
+        // --- 金額の数式計算機能 ---
+        const calcAmount = (str) => {
+            if (!str) return 0;
+            if (typeof str === 'number') return str;
+            try {
+                // 全角数字・記号を半角に変換
+                const halfStr = str.toString().replace(/[０-９＋－＊／．]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).replace(/ /g, '');
+                // 危険な文字を排除して計算
+                const sanitized = halfStr.replace(/[^-()\d/*+.]/g, '');
+                if (!sanitized) return 0;
+                return Math.floor(Function('"use strict";return (' + sanitized + ')')() || 0);
+            } catch (e) {
+                return 0;
+            }
         };
 
-        const getCurrentMonthStr = () => {
-            const d = new Date();
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const formatCurrency = (amountStr) => {
+            const num = calcAmount(amountStr);
+            return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY' }).format(num);
         };
 
-        const getPreviousMonthStr = () => {
-            const d = new Date();
-            d.setMonth(d.getMonth() - 1);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const DisplayAmount = ({ str, className = "" }) => {
+            const num = calcAmount(str);
+            const strVal = String(str || '');
+            const hasMath = /[+*+/-]/.test(strVal.replace(/[＋－＊／]/g, '+'));
+            return (
+                <div className={`flex flex-col items-end ${className}`}>
+                    <span className="font-bold">{formatCurrency(num)}</span>
+                    {hasMath && <span className="text-[10px] text-gray-400 font-mono -mt-1 tracking-tighter">({str})</span>}
+                </div>
+            );
+        };
+
+        const getCurrentMonthStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+        const getPreviousMonthStr = () => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+
+        const CAT_LABELS = {
+            'loan': { label: 'ローン', icon: 'home', color: 'text-purple-600', bg: 'bg-purple-100', border: 'border-purple-200' },
+            'fixed': { label: '固定費', icon: 'receipt_long', color: 'text-indigo-600', bg: 'bg-indigo-100', border: 'border-indigo-200' },
+            'variable': { label: '変動費', icon: 'credit_card', color: 'text-rose-600', bg: 'bg-rose-100', border: 'border-rose-200' },
+            'investment': { label: '投資', icon: 'trending_up', color: 'text-emerald-600', bg: 'bg-emerald-100', border: 'border-emerald-200' }
         };
 
         const Icon = ({ name, size = 24, className = '', ...props }) => {
@@ -77,101 +104,96 @@
                 'alert-triangle': 'warning', 'x': 'close', 'settings': 'settings', 'copy': 'content_copy',
                 'download': 'download', 'upload': 'upload', 'file-text': 'description', 'check': 'check',
                 'plus': 'add', 'trash-2': 'delete', 'pencil': 'edit', 'message-square': 'chat_bubble_outline',
-                'done': 'done_all', 'undo': 'undo', 'refresh': 'refresh', 'payments': 'payments' // 現金アイコン追加
+                'done': 'done_all', 'undo': 'undo', 'refresh': 'refresh', 'payments': 'payments',
+                'home': 'home', 'receipt_long': 'receipt_long', 'credit_card': 'credit_card', 'trending_up': 'trending_up'
             };
-            const mappedName = iconMap[name] || name;
-            return (
-                <span className={`material-symbols-outlined ${className}`} style={{ fontSize: `${size}px`, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} {...props}>
-                    {mappedName}
-                </span>
-            );
+            return <span className={`material-symbols-outlined ${className}`} style={{ fontSize: `${size}px`, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} {...props}>{iconMap[name] || name}</span>;
         };
 
         const App = () => {
             const [activeTab, setActiveTab] = useState('dashboard');
+            const [dashTab, setDashTab] = useState('accounts'); // 新規：ダッシュボード内のサブタブ
+
             const [deleteTarget, setDeleteTarget] = useState(null);
             const [selectedAccountPopup, setSelectedAccountPopup] = useState(null);
-            const [showHistorySavedModal, setShowHistorySavedModal] = useState(false);
             const [showAutoSaveModal, setShowAutoSaveModal] = useState(false);
             const [confirmImportData, setConfirmImportData] = useState(null);
-            const [showSuccessModal, setShowSuccessModal] = useState(false);
+            
             const [editMode, setEditMode] = useState(null);
             const [historyEditMode, setHistoryEditMode] = useState(null);
+            const [preSaveModal, setPreSaveModal] = useState(null); // 月末残高編集用モーダル
 
             // --- メインデータ ---
-            const [accounts, setAccounts] = useState(() => {
-                const saved = localStorage.getItem(STORAGE_KEY + 'accounts') || localStorage.getItem('mpm_v10_accounts');
-                return saved ? JSON.parse(saved) : [];
-            });
-            const [wallets, setWallets] = useState(() => { // 新規追加：手元現金
-                const saved = localStorage.getItem(STORAGE_KEY + 'wallets');
-                return saved ? JSON.parse(saved) : [];
-            });
-            const [incomes, setIncomes] = useState(() => {
-                const saved = localStorage.getItem(STORAGE_KEY + 'incomes') || localStorage.getItem('mpm_v10_incomes');
-                return saved ? JSON.parse(saved) : [];
-            });
-            const [payments, setPayments] = useState(() => {
-                const saved = localStorage.getItem(STORAGE_KEY + 'payments') || localStorage.getItem('mpm_v10_payments');
-                return saved ? JSON.parse(saved) : [];
-            });
-            const [history, setHistory] = useState(() => {
-                const saved = localStorage.getItem(STORAGE_KEY + 'history') || localStorage.getItem('mpm_v10_history');
-                return saved ? JSON.parse(saved) : [];
-            });
+            // 過去のデータ引き継ぎ時は isFixed -> category に変換
+            const migratePayments = (pts) => pts.map(p => ({ ...p, category: p.category || (p.isFixed ? 'fixed' : 'variable'), subItems: (p.subItems || []).map(s => ({...s, category: s.category || (s.isFixed ? 'fixed' : 'variable')})) }));
 
-            // 入力フォーム用ステート
+            const [accounts, setAccounts] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY + 'accounts') || localStorage.getItem('mpm_v11_accounts') || '[]'));
+            const [wallets, setWallets] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY + 'wallets') || localStorage.getItem('mpm_v11_wallets') || '[]'));
+            const [incomes, setIncomes] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY + 'incomes') || localStorage.getItem('mpm_v11_incomes') || '[]'));
+            const [payments, setPayments] = useState(() => migratePayments(JSON.parse(localStorage.getItem(STORAGE_KEY + 'payments') || localStorage.getItem('mpm_v11_payments') || '[]')));
+            const [history, setHistory] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY + 'history') || localStorage.getItem('mpm_v11_history') || '[]'));
+
             const [accName, setAccName] = useState(''); const [accAmount, setAccAmount] = useState(''); const [accIncoming, setAccIncoming] = useState(''); const [accMemo, setAccMemo] = useState('');
             const [walName, setWalName] = useState(''); const [walAmount, setWalAmount] = useState(''); const [walOutgo, setWalOutgo] = useState(''); const [walIsFixed, setWalIsFixed] = useState(false); const [walMemo, setWalMemo] = useState('');
             const [incName, setIncName] = useState(''); const [incAmount, setIncAmount] = useState(''); const [incIsFixed, setIncIsFixed] = useState(false); const [incMemo, setIncMemo] = useState('');
-            const [payName, setPayName] = useState(''); const [payAmount, setPayAmount] = useState(''); const [payDueDate, setPayDueDate] = useState(''); const [payAccountId, setPayAccountId] = useState(''); const [payIsFixed, setPayIsFixed] = useState(false); const [payMemo, setPayMemo] = useState('');
+            const [payName, setPayName] = useState(''); const [payAmount, setPayAmount] = useState(''); const [payDueDate, setPayDueDate] = useState(''); const [payAccountId, setPayAccountId] = useState(''); const [payCat, setPayCat] = useState('variable'); const [payMemo, setPayMemo] = useState('');
             
             const [expandedPayIds, setExpandedPayIds] = useState(new Set());
             const [subInputs, setSubInputs] = useState({}); 
-            const [saveMonthStr, setSaveMonthStr] = useState(getCurrentMonthStr());
-            const [manualHistoryMonth, setManualHistoryMonth] = useState(getPreviousMonthStr());
 
             const [exportData, setExportData] = useState('');
             const [importData, setImportData] = useState('');
-            const [copySuccess, setCopySuccess] = useState(false);
             const [importMsg, setImportMsg] = useState({ text: '', isError: false });
 
             // --- 計算処理 ---
-            const totalAccounts = useMemo(() => accounts.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [accounts]);
-            const activeAccountIncomes = useMemo(() => accounts.reduce((sum, item) => sum + (item.isIncomingDone ? 0 : (Number(item.incomingAmount) || 0)), 0), [accounts]);
-            const totalAccountIncomes = useMemo(() => accounts.reduce((sum, item) => sum + (Number(item.incomingAmount) || 0), 0), [accounts]);
+            const totalAccountsNum = useMemo(() => accounts.reduce((sum, item) => sum + calcAmount(item.amount), 0), [accounts]);
+            const totalWalletsNum = useMemo(() => wallets.reduce((sum, item) => sum + calcAmount(item.amount), 0), [wallets]);
             
-            // 手元現金関連の計算
-            const totalWallets = useMemo(() => wallets.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [wallets]);
-            const activeWalletsOutgo = useMemo(() => wallets.reduce((sum, item) => sum + (item.isOutgoDone ? 0 : (Number(item.outgoAmount) || 0)), 0), [wallets]);
-            const totalWalletsOutgo = useMemo(() => wallets.reduce((sum, item) => sum + (Number(item.outgoAmount) || 0), 0), [wallets]);
+            const activeAccountIncomes = useMemo(() => accounts.reduce((sum, item) => sum + (item.isIncomingDone ? 0 : calcAmount(item.incomingAmount)), 0), [accounts]);
+            const totalAccountIncomes = useMemo(() => accounts.reduce((sum, item) => sum + calcAmount(item.incomingAmount), 0), [accounts]);
+            
+            const activeWalletsOutgo = useMemo(() => wallets.reduce((sum, item) => sum + (item.isOutgoDone ? 0 : calcAmount(item.outgoAmount)), 0), [wallets]);
 
-            const activeIncomesList = useMemo(() => incomes.reduce((sum, item) => sum + (item.isDone ? 0 : (Number(item.amount) || 0)), 0), [incomes]);
-            const totalIncomesList = useMemo(() => incomes.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [incomes]);
-            
+            const activeIncomesList = useMemo(() => incomes.reduce((sum, item) => sum + (item.isDone ? 0 : calcAmount(item.amount)), 0), [incomes]);
             const remainingIncomes = Math.max(0, activeIncomesList - activeAccountIncomes);
             
-            const activePayments = useMemo(() => payments.reduce((sum, item) => sum + (item.isDone ? 0 : (Number(item.amount) || 0)), 0), [payments]);
-            const totalPayments = useMemo(() => payments.reduce((sum, item) => sum + (Number(item.amount) || 0), 0), [payments]);
+            const activePayments = useMemo(() => payments.reduce((sum, item) => sum + (item.isDone ? 0 : calcAmount(item.amount)), 0), [payments]);
+            const totalPaymentsNum = useMemo(() => payments.reduce((sum, item) => sum + calcAmount(item.amount), 0), [payments]);
             
-            // 手元現金も含めたキャッシュフロー計算
-            const activeFinalBalance = totalAccounts + totalWallets + activeAccountIncomes + remainingIncomes - activePayments - activeWalletsOutgo;
-            const absoluteFinalBalance = totalAccounts + totalWallets + totalIncomesList - totalPayments - totalWalletsOutgo;
+            // カテゴリ別集計（未済のみ）
+            const catTotals = useMemo(() => {
+                const totals = { loan: 0, fixed: 0, variable: 0, investment: 0 };
+                payments.forEach(p => {
+                    if (p.isDone) return;
+                    let subTotal = 0;
+                    if (p.subItems && p.subItems.length > 0) {
+                        p.subItems.forEach(s => {
+                            const sAmt = calcAmount(s.amount);
+                            subTotal += sAmt;
+                            totals[s.category || 'variable'] += sAmt;
+                        });
+                    }
+                    const pAmt = calcAmount(p.amount);
+                    const diff = pAmt - subTotal;
+                    if (diff > 0) totals[p.category || 'variable'] += diff;
+                });
+                return totals;
+            }, [payments]);
 
-            // --- 月替わりの自動保存＆一括リセット処理 ---
+            // 自動計算される月末残高（口座＋現金）
+            const calculatedEndBalance = totalAccountsNum + totalWalletsNum;
+
             useEffect(() => {
                 const currentMonth = getCurrentMonthStr();
                 const lastOpenedMonth = localStorage.getItem(STORAGE_KEY + 'last_opened_month');
                 
                 if (lastOpenedMonth && lastOpenedMonth !== currentMonth) {
                     const existingHistory = JSON.parse(localStorage.getItem(STORAGE_KEY + 'history') || '[]');
-                    const hasRecord = existingHistory.some(h => h.id === lastOpenedMonth);
-                    
-                    if (!hasRecord) {
+                    if (!existingHistory.some(h => h.id === lastOpenedMonth)) {
                         const [y, m] = lastOpenedMonth.split('-');
                         const label = `${y.slice(2)}年${parseInt(m, 10)}月`;
-                        // グラフ用の支払い総額は「口座からの支払い」＋「現金の消費」
-                        const autoRecord = { id: lastOpenedMonth, label, payment: totalPayments + totalWalletsOutgo, balance: absoluteFinalBalance };
+                        // ※自動保存時は現在の口座＋現金を「月末残高」とする
+                        const autoRecord = { id: lastOpenedMonth, label, payment: totalPaymentsNum, balance: calculatedEndBalance };
                         const updatedHistory = [...existingHistory, autoRecord].sort((a, b) => a.id.localeCompare(b.id));
                         setHistory(updatedHistory);
                         localStorage.setItem(STORAGE_KEY + 'history', JSON.stringify(updatedHistory));
@@ -180,66 +202,43 @@
                     executeMonthlyReset();
                 }
                 localStorage.setItem(STORAGE_KEY + 'last_opened_month', currentMonth);
-            }, []);
+            }, [totalPaymentsNum, calculatedEndBalance]);
 
             const executeMonthlyReset = () => {
                 setAccounts(prev => prev.map(a => ({ ...a, incomingAmount: '', isIncomingDone: false })));
                 setWallets(prev => prev.map(w => ({ ...w, outgoAmount: w.isOutgoFixed ? w.outgoAmount : '', isOutgoDone: false })));
                 setIncomes(prev => prev.map(i => ({ ...i, amount: i.isFixed ? i.amount : '', isDone: false })));
+                // 支払い：変動費のみ空欄にする
                 setPayments(prev => prev.map(p => ({
-                    ...p, amount: p.isFixed ? p.amount : '', isDone: false,
-                    subItems: (p.subItems || []).map(s => ({ ...s, amount: s.isFixed ? s.amount : '' }))
+                    ...p, amount: p.category === 'variable' ? '' : p.amount, isDone: false,
+                    subItems: (p.subItems || []).map(s => ({ ...s, amount: s.category === 'variable' ? '' : s.amount }))
                 })));
             };
 
-            const handleManualResetClick = () => {
-                if (window.confirm('すべての「済」マークを解除し、固定費以外の金額を空欄にリセットします。よろしいですか？')) {
-                    executeMonthlyReset();
-                    alert('リセットが完了しました。');
-                }
-            };
+            const handleManualResetClick = () => { if (window.confirm('すべての「済」を解除し、変動費の金額をリセットします。')) { executeMonthlyReset(); alert('リセットしました。'); } };
 
-            // --- データの同期保存 ---
             useEffect(() => { localStorage.setItem(STORAGE_KEY + 'accounts', JSON.stringify(accounts)); }, [accounts]);
             useEffect(() => { localStorage.setItem(STORAGE_KEY + 'wallets', JSON.stringify(wallets)); }, [wallets]);
             useEffect(() => { localStorage.setItem(STORAGE_KEY + 'incomes', JSON.stringify(incomes)); }, [incomes]);
             useEffect(() => { localStorage.setItem(STORAGE_KEY + 'payments', JSON.stringify(payments)); }, [payments]);
             useEffect(() => { localStorage.setItem(STORAGE_KEY + 'history', JSON.stringify(history)); }, [history]);
 
+            // --- 金額入力用ヘルパー（カンマを除去） ---
+            const cleanInput = (val) => val.replace(/,/g, '');
+
             // --- 追加ハンドラ ---
-            const handleAddAccount = (e) => {
-                e.preventDefault(); if (!accName) return;
-                setAccounts([...accounts, { id: Date.now(), name: accName, amount: accAmount !== '' ? Number(accAmount) : '', incomingAmount: accIncoming !== '' ? Number(accIncoming) : '', isIncomingDone: false, memo: accMemo }]);
-                setAccName(''); setAccAmount(''); setAccIncoming(''); setAccMemo('');
-            };
-            const handleAddWallet = (e) => {
-                e.preventDefault(); if (!walName) return;
-                setWallets([...wallets, { id: Date.now(), name: walName, amount: walAmount !== '' ? Number(walAmount) : '', outgoAmount: walOutgo !== '' ? Number(walOutgo) : '', isOutgoDone: false, isOutgoFixed: walIsFixed, memo: walMemo }]);
-                setWalName(''); setWalAmount(''); setWalOutgo(''); setWalIsFixed(false); setWalMemo('');
-            };
-            const handleAddIncome = (e) => {
-                e.preventDefault(); if (!incName) return;
-                setIncomes([...incomes, { id: Date.now(), name: incName, amount: incAmount !== '' ? Number(incAmount) : '', isFixed: incIsFixed, isDone: false, memo: incMemo }]);
-                setIncName(''); setIncAmount(''); setIncIsFixed(false); setIncMemo('');
-            };
-            const handleAddPayment = (e) => {
-                e.preventDefault(); if (!payName) return;
-                setPayments([...payments, { id: Date.now(), name: payName, amount: payAmount !== '' ? Number(payAmount) : '', dueDate: payDueDate ? Number(payDueDate) : null, accountId: payAccountId ? Number(payAccountId) : '', isFixed: payIsFixed, isDone: false, memo: payMemo, subItems: [] }]);
-                setPayName(''); setPayAmount(''); setPayDueDate(''); setPayAccountId(''); setPayIsFixed(false); setPayMemo('');
-            };
+            const handleAddAccount = (e) => { e.preventDefault(); if(!accName) return; setAccounts([...accounts, { id: Date.now(), name: accName, amount: cleanInput(accAmount), incomingAmount: cleanInput(accIncoming), isIncomingDone: false, memo: accMemo }]); setAccName(''); setAccAmount(''); setAccIncoming(''); setAccMemo(''); };
+            const handleAddWallet = (e) => { e.preventDefault(); if(!walName) return; setWallets([...wallets, { id: Date.now(), name: walName, amount: cleanInput(walAmount), outgoAmount: cleanInput(walOutgo), isOutgoDone: false, isOutgoFixed: walIsFixed, memo: walMemo }]); setWalName(''); setWalAmount(''); setWalOutgo(''); setWalIsFixed(false); setWalMemo(''); };
+            const handleAddIncome = (e) => { e.preventDefault(); if(!incName) return; setIncomes([...incomes, { id: Date.now(), name: incName, amount: cleanInput(incAmount), isFixed: incIsFixed, isDone: false, memo: incMemo }]); setIncName(''); setIncAmount(''); setIncIsFixed(false); setIncMemo(''); };
+            const handleAddPayment = (e) => { e.preventDefault(); if(!payName) return; setPayments([...payments, { id: Date.now(), name: payName, amount: cleanInput(payAmount), dueDate: payDueDate ? Number(payDueDate) : null, accountId: payAccountId ? Number(payAccountId) : '', category: payCat, isDone: false, memo: payMemo, subItems: [] }]); setPayName(''); setPayAmount(''); setPayDueDate(''); setPayAccountId(''); setPayCat('variable'); setPayMemo(''); };
             const handleAddSubItem = (e, paymentId) => {
                 e.preventDefault(); const inputs = subInputs[paymentId] || {}; if (!inputs.name) return;
-                const newItem = { id: Date.now(), name: inputs.name, amount: inputs.amount !== '' ? Number(inputs.amount) : '', isFixed: inputs.isFixed === true, endDate: inputs.endDate || '', memo: inputs.memo || '' };
+                const newItem = { id: Date.now(), name: inputs.name, amount: cleanInput(inputs.amount || ''), category: inputs.category || 'variable', endDate: inputs.endDate || '', memo: inputs.memo || '' };
                 setPayments(payments.map(p => p.id === paymentId ? { ...p, subItems: [...(p.subItems || []), newItem] } : p));
-                setSubInputs({ ...subInputs, [paymentId]: { name: '', amount: '', isFixed: false, endDate: '', memo: '' }});
+                setSubInputs({ ...subInputs, [paymentId]: { name: '', amount: '', category: 'variable', endDate: '', memo: '' }});
             };
 
-            // --- 削除・チェック状態ハンドラ ---
-            const toggleExpand = (id) => {
-                const newSet = new Set(expandedPayIds);
-                if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
-                setExpandedPayIds(newSet);
-            };
+            const toggleExpand = (id) => { const newSet = new Set(expandedPayIds); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setExpandedPayIds(newSet); };
             const handleDeleteSubItem = (paymentId, subItemId) => { setPayments(payments.map(p => p.id === paymentId ? { ...p, subItems: (p.subItems || []).filter(s => s.id !== subItemId) } : p)); };
             const requestDelete = (type, item) => setDeleteTarget({ type, ...item });
             const executeDelete = () => {
@@ -254,53 +253,53 @@
             const toggleWalletOutgoDone = (id, e) => { e.stopPropagation(); setWallets(wallets.map(w => w.id === id ? { ...w, isOutgoDone: !w.isOutgoDone } : w)); };
             const toggleIncomeDone = (id) => { setIncomes(incomes.map(i => i.id === id ? { ...i, isDone: !i.isDone } : i)); };
             const togglePaymentDone = (id) => { setPayments(payments.map(p => p.id === id ? { ...p, isDone: !p.isDone } : p)); };
+            const handleMoveItem = (list, index, direction, setList) => { const newIndex = index + direction; if (newIndex < 0 || newIndex >= list.length) return; const newItems = [...list]; [newItems[index], newItems[newIndex]] = [newItems[newIndex], newItems[index]]; setList(newItems); };
 
-            const handleMoveItem = (list, index, direction, setList) => {
-                const newIndex = index + direction; if (newIndex < 0 || newIndex >= list.length) return;
-                const newItems = [...list]; [newItems[index], newItems[newIndex]] = [newItems[newIndex], newItems[index]]; setList(newItems);
-            };
-
-            // --- 編集処理 ---
             const startEdit = (type, item, extraProps = {}) => { setEditMode({ type, ...item, ...extraProps }); };
             const saveEdit = (e) => {
                 if (e) e.preventDefault(); if (!editMode || !editMode.name) return;
-                const amtValue = editMode.amount === '' ? '' : Number(editMode.amount);
+                const amtValue = cleanInput(String(editMode.amount || ''));
                 if (editMode.type === 'account') {
-                    setAccounts(accounts.map(a => a.id === editMode.id ? { ...a, name: editMode.name, amount: amtValue, incomingAmount: editMode.incomingAmount === '' ? '' : Number(editMode.incomingAmount), memo: editMode.memo } : a));
+                    setAccounts(accounts.map(a => a.id === editMode.id ? { ...a, name: editMode.name, amount: amtValue, incomingAmount: cleanInput(String(editMode.incomingAmount || '')), memo: editMode.memo } : a));
                 } else if (editMode.type === 'wallet') {
-                    setWallets(wallets.map(w => w.id === editMode.id ? { ...w, name: editMode.name, amount: amtValue, outgoAmount: editMode.outgoAmount === '' ? '' : Number(editMode.outgoAmount), isOutgoFixed: editMode.isOutgoFixed, memo: editMode.memo } : w));
+                    setWallets(wallets.map(w => w.id === editMode.id ? { ...w, name: editMode.name, amount: amtValue, outgoAmount: cleanInput(String(editMode.outgoAmount || '')), isOutgoFixed: editMode.isOutgoFixed, memo: editMode.memo } : w));
                 } else if (editMode.type === 'income') {
                     setIncomes(incomes.map(i => i.id === editMode.id ? { ...i, name: editMode.name, amount: amtValue, isFixed: editMode.isFixed, memo: editMode.memo } : i));
                 } else if (editMode.type === 'payment') {
-                    setPayments(payments.map(p => p.id === editMode.id ? { ...p, name: editMode.name, amount: amtValue, memo: editMode.memo, dueDate: editMode.dueDate ? Number(editMode.dueDate) : null, accountId: editMode.accountId ? Number(editMode.accountId) : '', isFixed: editMode.isFixed } : p));
+                    setPayments(payments.map(p => p.id === editMode.id ? { ...p, name: editMode.name, amount: amtValue, memo: editMode.memo, dueDate: editMode.dueDate ? Number(editMode.dueDate) : null, accountId: editMode.accountId ? Number(editMode.accountId) : '', category: editMode.category } : p));
                 } else if (editMode.type === 'subItem') {
-                    setPayments(payments.map(p => { if (p.id === editMode.paymentId) { return { ...p, subItems: p.subItems.map(s => s.id === editMode.id ? { ...s, name: editMode.name, amount: amtValue, memo: editMode.memo, isFixed: editMode.isFixed, endDate: editMode.endDate } : s) }; } return p; }));
+                    setPayments(payments.map(p => { if (p.id === editMode.paymentId) { return { ...p, subItems: p.subItems.map(s => s.id === editMode.id ? { ...s, name: editMode.name, amount: amtValue, memo: editMode.memo, category: editMode.category, endDate: editMode.endDate } : s) }; } return p; }));
                 }
                 setEditMode(null);
             };
 
-            // --- グラフ（履歴）編集処理 ---
-            const handleSaveHistoryManual = () => {
-                if (!saveMonthStr) return; const [year, month] = saveMonthStr.split('-'); const label = `${year.slice(2)}年${parseInt(month, 10)}月`;
-                const newRecord = { id: saveMonthStr, label, payment: totalPayments + totalWalletsOutgo, balance: absoluteFinalBalance };
-                const filtered = history.filter(h => h.id !== saveMonthStr); setHistory([...filtered, newRecord].sort((a, b) => a.id.localeCompare(b.id))); setShowHistorySavedModal(true);
+            // --- グラフ保存：残高を手動編集可能にする ---
+            const triggerSaveHistory = (monthStr) => {
+                const [year, month] = monthStr.split('-');
+                const label = `${year.slice(2)}年${parseInt(month, 10)}月`;
+                setPreSaveModal({
+                    id: monthStr, label, payment: totalPaymentsNum, balance: calculatedEndBalance
+                });
             };
-            const handleSaveAsPreviousMonth = () => {
-                if (!manualHistoryMonth) return; const [year, month] = manualHistoryMonth.split('-'); const label = `${year.slice(2)}年${parseInt(month, 10)}月`;
-                const newRecord = { id: manualHistoryMonth, label, payment: totalPayments + totalWalletsOutgo, balance: absoluteFinalBalance };
-                const filtered = history.filter(h => h.id !== manualHistoryMonth); setHistory([...filtered, newRecord].sort((a, b) => a.id.localeCompare(b.id))); alert(`${label}のデータとして現在の状態を保存しました。`);
+
+            const confirmSaveHistory = () => {
+                if (!preSaveModal) return;
+                const newRecord = { id: preSaveModal.id, label: preSaveModal.label, payment: Number(preSaveModal.payment) || 0, balance: Number(preSaveModal.balance) || 0 };
+                const filtered = history.filter(h => h.id !== preSaveModal.id);
+                setHistory([...filtered, newRecord].sort((a, b) => a.id.localeCompare(b.id)));
+                setPreSaveModal(null);
+                alert(`${preSaveModal.label}のデータを保存しました！`);
             };
+
             const handleSaveHistoryEdit = (e) => {
                 e.preventDefault(); if (!historyEditMode) return;
                 setHistory(history.map(h => h.id === historyEditMode.id ? { ...h, payment: Number(historyEditMode.payment) || 0, balance: Number(historyEditMode.balance) || 0 } : h)); setHistoryEditMode(null);
             };
-            const handleDeleteHistory = (id) => { if (window.confirm('この月の履歴データを削除してもよろしいですか？')) { setHistory(history.filter(h => h.id !== id)); } };
 
-            // --- バックアップ処理 ---
-            const safeMemo = (memo) => (memo || '').replace(/,/g, '，').replace(/\n/g, ' ');
+            // --- バックアップ ---
+            const safeMemo = (memo) => String(memo || '').replace(/,/g, '，').replace(/\n/g, ' ');
             const generateExportText = () => {
-                let txt = "---支払い管理バックアップ---\n\n";
-                txt += "【手元現金】\n";
+                let txt = "---支払い管理バックアップ---\n\n【手元現金】\n";
                 wallets.forEach(w => txt += `${w.id},${w.name},${w.amount || 0},${w.outgoAmount || 0},${w.isOutgoDone ? 1 : 0},${w.isOutgoFixed ? 1 : 0},${safeMemo(w.memo)}\n`);
                 txt += "\n【口座】\n";
                 accounts.forEach(a => txt += `${a.id},${a.name},${a.amount || 0},${a.incomingAmount || 0},${a.isIncomingDone ? 1 : 0},${safeMemo(a.memo)}\n`);
@@ -308,71 +307,87 @@
                 incomes.forEach(i => txt += `${i.id},${i.name},${i.amount || 0},${i.isFixed ? 1 : 0},${i.isDone ? 1 : 0},${safeMemo(i.memo)}\n`);
                 txt += "\n【支払い】\n";
                 payments.forEach(p => {
-                    txt += `${p.id},${p.name},${p.amount || 0},${p.dueDate || ''},${p.accountId || ''},${p.isFixed ? 1 : 0},${p.isDone ? 1 : 0},${safeMemo(p.memo)}\n`;
-                    if (p.subItems && p.subItems.length > 0) p.subItems.forEach(s => { txt += `>${s.id},${s.name},${s.amount || 0},${s.isFixed ? 1 : 0},${s.endDate || ''},${safeMemo(s.memo)}\n`; });
+                    txt += `${p.id},${p.name},${p.amount || 0},${p.dueDate || ''},${p.accountId || ''},${p.category || 'variable'},${p.isDone ? 1 : 0},${safeMemo(p.memo)}\n`;
+                    if (p.subItems && p.subItems.length > 0) p.subItems.forEach(s => { txt += `>${s.id},${s.name},${s.amount || 0},${s.category || 'variable'},${s.endDate || ''},${safeMemo(s.memo)}\n`; });
                 });
                 txt += "\n【履歴】\n";
                 history.forEach(h => txt += `${h.id},${h.label},${h.payment},${h.balance}\n`);
                 return txt;
             };
 
-            const handleGenerateExport = () => { try { setExportData(generateExportText()); setCopySuccess(false); setImportMsg({ text: '', isError: false }); } catch (e) { setImportMsg({ text: '出力エラーが発生しました。', isError: true }); } };
+            const handleGenerateExport = () => { try { setExportData(generateExportText()); setImportMsg({ text: '', isError: false }); } catch (e) { setImportMsg({ text: 'エラー', isError: true }); } };
             const handleDownloadExport = () => {
                 try {
-                    const blob = new Blob([generateExportText()], { type: 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url;
-                    const date = new Date(); a.download = `payment_backup_${date.getFullYear()}${String(date.getMonth()+1).padStart(2,'0')}${String(date.getDate()).padStart(2,'0')}.txt`;
-                    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-                } catch (e) { setImportMsg({ text: 'ファイル保存に失敗しました。', isError: true }); }
-            };
-            const handleCopy = () => {
-                if (!exportData) return;
-                const fallbackCopy = () => { const ta = document.createElement("textarea"); ta.value = exportData; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); setCopySuccess(true); setTimeout(() => setCopySuccess(false), 3000); } catch (err) {} document.body.removeChild(ta); };
-                if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(exportData).then(() => { setCopySuccess(true); setTimeout(() => setCopySuccess(false), 3000); }).catch(fallbackCopy); } else { fallbackCopy(); }
-            };
-            const handleFileUpload = (e) => {
-                const file = e.target.files[0]; if (!file) return; const reader = new FileReader();
-                reader.onload = (ev) => { setImportData(ev.target.result); setImportMsg({ text: 'ファイルを読み込みました。「復元を実行する」ボタンを押してください。', isError: false }); };
-                reader.readAsText(file); e.target.value = null;
+                    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([generateExportText()], { type: 'text/plain' }));
+                    a.download = `payment_backup_${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}${String(new Date().getDate()).padStart(2,'0')}.txt`;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                } catch (e) { setImportMsg({ text: 'エラー', isError: true }); }
             };
             const handleImportClick = () => {
-                if (!importData.trim()) { setImportMsg({ text: 'データを入力してください。', isError: true }); return; }
+                if (!importData.trim()) return;
                 try {
-                    const fixedText = importData.replace(/，/g, ',').replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-                    const lines = fixedText.split('\n'); let mode = ''; const nA = [], nW = [], nI = [], nP = [], nH = []; let currP = null;
+                    const lines = importData.replace(/，/g, ',').replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).split('\n');
+                    let mode = ''; const nA = [], nW = [], nI = [], nP = [], nH = []; let currP = null;
                     for(let i=0; i<lines.length; i++) {
                         let line = lines[i].trim(); if (!line || line.startsWith('---')) continue; if (line.startsWith('【')) { mode = line; continue; }
                         const pts = line.split(',');
-                        if (mode === '【口座】' && pts.length >= 3) nA.push({ id: Number(pts[0]), name: pts[1], amount: pts[2] !== '' ? Number(pts[2]) : '', incomingAmount: pts[3] !== undefined && pts[3] !== '' ? Number(pts[3]) : '', isIncomingDone: pts[4] === '1', memo: pts.slice(5).join(',') || '' });
-                        else if (mode === '【手元現金】' && pts.length >= 3) nW.push({ id: Number(pts[0]), name: pts[1], amount: pts[2] !== '' ? Number(pts[2]) : '', outgoAmount: pts[3] !== undefined && pts[3] !== '' ? Number(pts[3]) : '', isOutgoDone: pts[4] === '1', isOutgoFixed: pts[5] === '1', memo: pts.slice(6).join(',') || '' });
-                        else if (mode === '【入金】' && pts.length >= 3) nI.push({ id: Number(pts[0]), name: pts[1], amount: pts[2] !== '' ? Number(pts[2]) : '', isFixed: pts[3] === '1', isDone: pts[4] === '1', memo: pts.slice(5).join(',') || '' });
+                        if (mode === '【口座】' && pts.length >= 3) nA.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], incomingAmount: pts[3] || '', isIncomingDone: pts[4] === '1', memo: pts.slice(5).join(',') });
+                        else if (mode === '【手元現金】' && pts.length >= 3) nW.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], outgoAmount: pts[3] || '', isOutgoDone: pts[4] === '1', isOutgoFixed: pts[5] === '1', memo: pts.slice(6).join(',') });
+                        else if (mode === '【入金】' && pts.length >= 3) nI.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], isFixed: pts[3] === '1', isDone: pts[4] === '1', memo: pts.slice(5).join(',') });
                         else if (mode === '【支払い】') {
-                            if (line.startsWith('>') && currP && pts.length >= 5) currP.subItems.push({ id: Number(pts[0].substring(1)), name: pts[1], amount: pts[2] !== '' ? Number(pts[2]) : '', isFixed: pts[3] === '1', endDate: pts[4] || '', memo: pts.slice(5).join(',') || '' });
-                            else if (pts.length >= 3) { currP = { id: Number(pts[0]), name: pts[1], amount: pts[2] !== '' ? Number(pts[2]) : '', dueDate: pts[3] ? Number(pts[3]) : null, accountId: pts[4] ? Number(pts[4]) : '', isFixed: pts[5] === '1', isDone: pts[6] === '1', memo: pts.slice(7).join(',') || '', subItems: [] }; nP.push(currP); }
+                            if (line.startsWith('>') && currP && pts.length >= 5) {
+                                // 互換性: 昔のisFixed(1/0)をcategoryに変換
+                                const cat = (pts[3] === '1' || pts[3] === '0') ? (pts[3]==='1'?'fixed':'variable') : pts[3];
+                                currP.subItems.push({ id: Number(pts[0].substring(1)), name: pts[1], amount: pts[2], category: cat, endDate: pts[4] || '', memo: pts.slice(5).join(',') });
+                            }
+                            else if (pts.length >= 3) {
+                                const cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5];
+                                currP = { id: Number(pts[0]), name: pts[1], amount: pts[2], dueDate: pts[3] ? Number(pts[3]) : null, accountId: pts[4] ? Number(pts[4]) : '', category: cat, isDone: pts[6] === '1', memo: pts.slice(7).join(','), subItems: [] }; nP.push(currP); 
+                            }
                         } else if (mode === '【履歴】' && pts.length >= 4) nH.push({ id: pts[0], label: pts[1], payment: Number(pts[2]), balance: Number(pts[3]) });
                     }
                     setConfirmImportData({ accounts: nA, wallets: nW, incomes: nI, payments: nP, history: nH });
                 } catch (e) { setImportMsg({ text: 'データの解析に失敗しました。', isError: true }); }
             };
-            const executeImport = () => {
-                if (!confirmImportData) return; setAccounts(confirmImportData.accounts); setWallets(confirmImportData.wallets); setIncomes(confirmImportData.incomes); setPayments(confirmImportData.payments); if (confirmImportData.history) setHistory(confirmImportData.history);
-                setImportData(''); setConfirmImportData(null); setShowSuccessModal(true);
-            };
 
             const SortButtons = ({ onMoveUp, onMoveDown, isFirst, isLast }) => (
                 <div className="flex flex-col mr-2 items-center justify-center shrink-0">
-                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMoveUp(); }} disabled={isFirst} className={`p-1.5 rounded transition-colors ${isFirst ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'}`}><Icon name="chevron-up" size={20} /></button>
-                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMoveDown(); }} disabled={isLast} className={`p-1.5 rounded transition-colors ${isLast ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'}`}><Icon name="chevron-down" size={20} /></button>
+                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMoveUp(); }} disabled={isFirst} className="p-1.5 text-gray-400 hover:bg-gray-100"><Icon name="chevron-up" size={20} /></button>
+                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMoveDown(); }} disabled={isLast} className="p-1.5 text-gray-400 hover:bg-gray-100"><Icon name="chevron-down" size={20} /></button>
                 </div>
             );
 
             return (
-                <div className="min-h-screen p-4 md:p-8">
+                <div className="min-h-screen p-4 md:p-8 pb-24">
+                    {/* --- モーダル群 --- */}
+                    {preSaveModal && (
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[80] p-4 animate-fade-in">
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-zoom-in">
+                                <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Icon name="save" className="text-indigo-600"/> 履歴データの保存</h3>
+                                <p className="text-sm text-gray-600 mb-4 font-bold">{preSaveModal.label}のデータとして以下を保存します。金額は自由に修正可能です。</p>
+                                <div className="space-y-3 mb-6">
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 mb-1 block">発生総支払 (自動計算済)</label>
+                                        <input type="number" value={preSaveModal.payment} onChange={e=>setPreSaveModal({...preSaveModal, payment: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-300" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 mb-1 block">月末残高 (現在の口座＋現金)</label>
+                                        <input type="number" value={preSaveModal.balance} onChange={e=>setPreSaveModal({...preSaveModal, balance: e.target.value})} className="w-full px-3 py-2 border border-indigo-300 bg-indigo-50 rounded-lg focus:ring-2 focus:ring-indigo-400 font-bold" />
+                                    </div>
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                    <button onClick={() => setPreSaveModal(null)} className="px-4 py-2 text-gray-600 font-bold hover:bg-gray-100 rounded-lg">キャンセル</button>
+                                    <button onClick={confirmSaveHistory} className="px-6 py-2 bg-indigo-600 text-white font-bold hover:bg-indigo-700 rounded-lg shadow-md">保存を実行</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {showAutoSaveModal && (
                         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center animate-zoom-in">
                                 <div className="mx-auto w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4"><Icon name="check-circle-2" size={32} /></div>
-                                <h3 className="text-xl font-bold text-gray-800 mb-2">前月データの自動保存</h3>
-                                <p className="text-sm text-gray-600 mb-6">月替わりを検知したため、前月の最終状態を推移グラフに自動保存し、固定費以外の数値をリセットしました。</p>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2">月替わりリセット完了</h3>
+                                <p className="text-sm text-gray-600 mb-6">前月データを自動保存し、変動費や済マークをリセットしました。</p>
                                 <button onClick={() => setShowAutoSaveModal(false)} className="w-full py-2.5 bg-gray-800 text-white font-bold rounded-lg hover:bg-gray-700">確認</button>
                             </div>
                         </div>
@@ -381,82 +396,61 @@
                         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[70] p-4 animate-fade-in">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-zoom-in">
                                 <div className="flex items-center gap-3 text-red-600 mb-4"><Icon name="alert-triangle" size={28} /><h3 className="text-lg font-bold">削除の確認</h3></div>
-                                <p className="text-gray-600 mb-6 leading-relaxed">「<span className="font-bold">{deleteTarget.name}</span>」を削除してもよろしいですか？</p>
-                                <div className="flex justify-end gap-3">
-                                    <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 text-gray-600 font-bold hover:bg-gray-100 rounded-lg">キャンセル</button>
-                                    <button onClick={executeDelete} className="px-4 py-2 bg-red-500 text-white font-bold hover:bg-red-600 rounded-lg">削除する</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    {selectedAccountPopup && (() => {
-                        const acc = selectedAccountPopup; const relPayments = payments.filter(p => p.accountId === acc.id);
-                        return (
-                            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onClick={() => setSelectedAccountPopup(null)}>
-                                <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[85vh] animate-zoom-in" onClick={e => e.stopPropagation()}>
-                                    <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-blue-50/50 rounded-t-2xl">
-                                        <div><h3 className="text-xl font-bold text-gray-800">{acc.name}</h3><p className="text-sm text-gray-500 font-medium mt-1">現在の残高: <span className="text-gray-800 font-bold">{formatCurrency(acc.amount)}</span></p></div>
-                                        <button onClick={() => setSelectedAccountPopup(null)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white rounded-full bg-gray-50"><Icon name="x" size={24} /></button>
-                                    </div>
-                                    <div className="p-5 overflow-y-auto">
-                                        <h4 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><Icon name="arrow-up-from-line" size={20} className="text-rose-500" /> 引落予定の明細一覧</h4>
-                                        {relPayments.length > 0 ? (
-                                            <div className="space-y-2">
-                                                {relPayments.map(p => (
-                                                    <div key={p.id} className={`flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 text-sm shadow-sm ${p.isDone ? 'opacity-40 bg-gray-50' : ''}`}>
-                                                        <div>
-                                                            <span className={`font-bold text-gray-700 block mb-1 ${p.isDone ? 'line-through' : ''}`}>{p.name}</span>
-                                                            <div className="flex gap-2 text-[10px]">
-                                                                {p.dueDate && <span className="bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded text-gray-500 font-medium inline-flex items-center gap-1"><Icon name="calendar" size={14}/> {p.dueDate}日引落</span>}
-                                                                {p.isDone && <span className="bg-rose-100 text-rose-700 font-bold px-1.5 py-0.5 rounded">引落済</span>}
-                                                            </div>
-                                                        </div>
-                                                        <span className="font-bold text-gray-800">{formatCurrency(p.amount)}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : (<div className="py-8 text-center bg-gray-50 rounded-xl border border-gray-200 border-dashed"><p className="text-sm text-gray-500">引き落とし予定はありません</p></div>)}
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })()}
-                    {showHistorySavedModal && (
-                        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center animate-zoom-in">
-                                <div className="mx-auto w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-4"><Icon name="save" size={32} /></div>
-                                <h3 className="text-xl font-bold text-gray-800 mb-2">保存完了</h3><p className="text-gray-600 mb-6">指定した月のデータを上書き・保存しました。</p>
-                                <button onClick={() => setShowHistorySavedModal(false)} className="w-full py-2.5 bg-gray-800 text-white font-bold rounded-lg hover:bg-gray-700">閉じる</button>
+                                <p className="text-gray-600 mb-6">「<span className="font-bold">{deleteTarget.name}</span>」を削除してもよろしいですか？</p>
+                                <div className="flex justify-end gap-3"><button onClick={() => setDeleteTarget(null)} className="px-4 py-2 hover:bg-gray-100 rounded-lg font-bold text-gray-600">キャンセル</button><button onClick={executeDelete} className="px-4 py-2 bg-red-500 text-white font-bold rounded-lg">削除する</button></div>
                             </div>
                         </div>
                     )}
                     {confirmImportData && (
                         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-fade-in">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center animate-zoom-in">
-                                <div className="flex items-center justify-center gap-3 text-amber-500 mb-4"><Icon name="alert-triangle" size={32} /><h3 className="text-xl font-bold text-gray-800">復元の確認</h3></div>
-                                <p className="text-gray-600 mb-6 leading-relaxed">現在のデータはすべて上書きされ、元に戻せません。<br/>本当に復元してもよろしいですか？</p>
-                                <div className="flex justify-center gap-3">
-                                    <button onClick={() => setConfirmImportData(null)} className="px-4 py-2 text-gray-600 font-bold hover:bg-gray-100 rounded-lg">キャンセル</button>
-                                    <button onClick={() => { executeImport(); setConfirmImportData(null); }} className="px-4 py-2 bg-emerald-600 text-white font-bold hover:bg-emerald-700 rounded-lg">復元を実行</button>
+                                <div className="flex justify-center mb-4 text-amber-500"><Icon name="alert-triangle" size={32} /></div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2">復元の確認</h3><p className="text-sm text-gray-600 mb-6">現在のデータはすべて上書きされます。よろしいですか？</p>
+                                <div className="flex justify-center gap-3"><button onClick={() => setConfirmImportData(null)} className="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg">キャンセル</button><button onClick={() => { setAccounts(confirmImportData.accounts); setWallets(confirmImportData.wallets); setIncomes(confirmImportData.incomes); setPayments(confirmImportData.payments); setHistory(confirmImportData.history); setConfirmImportData(null); }} className="px-4 py-2 bg-emerald-600 text-white font-bold rounded-lg">復元を実行</button></div>
+                            </div>
+                        </div>
+                    )}
+                    {selectedAccountPopup && (() => {
+                        const acc = selectedAccountPopup; const relPays = payments.filter(p => p.accountId === acc.id);
+                        const activeOut = relPays.filter(p => !p.isDone).reduce((s, p) => s + calcAmount(p.amount), 0);
+                        const expected = calcAmount(acc.amount) + (acc.isIncomingDone ? 0 : calcAmount(acc.incomingAmount)) - activeOut;
+                        return (
+                            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onClick={() => setSelectedAccountPopup(null)}>
+                                <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[85vh] animate-zoom-in" onClick={e => e.stopPropagation()}>
+                                    <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-blue-50/50 rounded-t-2xl">
+                                        <div><h3 className="text-xl font-bold text-gray-800">{acc.name}</h3><p className="text-sm text-gray-500 font-medium mt-1">現在残高: <span className="font-bold text-gray-800">{formatCurrency(acc.amount)}</span></p></div>
+                                        <button onClick={() => setSelectedAccountPopup(null)} className="p-2 text-gray-400 hover:bg-white rounded-full bg-gray-50"><Icon name="x" size={24} /></button>
+                                    </div>
+                                    <div className="p-5 overflow-y-auto">
+                                        <h4 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2"><Icon name="arrow-up-from-line" size={20} className="text-rose-500" /> 引落予定の明細一覧</h4>
+                                        {relPays.length > 0 ? (
+                                            <div className="space-y-2">
+                                                {relPays.map(p => (
+                                                    <div key={p.id} className={`flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 text-sm shadow-sm ${p.isDone ? 'opacity-40 bg-gray-50' : ''}`}>
+                                                        <div>
+                                                            <span className={`font-bold block mb-1 ${p.isDone?'line-through':''}`}>{p.name}</span>
+                                                            <div className="flex gap-2 text-[10px]">{p.dueDate && <span className="bg-gray-50 border px-1.5 py-0.5 rounded text-gray-500 flex items-center gap-1"><Icon name="calendar" size={12}/>{p.dueDate}日引落</span>}{p.isDone && <span className="bg-rose-100 text-rose-700 font-bold px-1.5 py-0.5 rounded">済</span>}</div>
+                                                        </div>
+                                                        <span className="font-bold text-gray-800">{formatCurrency(p.amount)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (<p className="py-8 text-center text-sm text-gray-500 border border-dashed rounded-xl">引落予定はありません</p>)}
+                                    </div>
+                                    <div className="p-5 border-t bg-gray-50 rounded-b-2xl">
+                                        <div className="flex justify-between text-sm font-bold mb-2"><span className="text-gray-600">未済引落合計</span><span className="text-rose-600">-{formatCurrency(activeOut)}</span></div>
+                                        <div className="flex justify-between pt-3 border-t border-gray-200"><span className="text-sm font-bold text-gray-600">引落後予想残高</span><span className={`font-black text-xl ${expected < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatCurrency(expected)}</span></div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    )}
-                    {showSuccessModal && (
-                        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-fade-in">
-                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center animate-zoom-in">
-                                <div className="mx-auto w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4"><Icon name="check-circle-2" size={32} /></div>
-                                <h3 className="text-xl font-bold text-gray-800 mb-2">復元完了</h3><p className="text-gray-600 mb-6">データの復元が正常に完了しました。</p>
-                                <button onClick={() => setShowSuccessModal(false)} className="w-full py-2.5 bg-gray-800 text-white font-bold rounded-lg hover:bg-gray-700">閉じる</button>
-                            </div>
-                        </div>
-                    )}
+                        );
+                    })()}
 
                     <div className="max-w-6xl mx-auto space-y-6">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                             <div className="flex items-center gap-3"><Icon name="calculator" className="text-indigo-600" size={32} /><h1 className="text-2xl font-bold text-gray-800">毎月の支払い管理</h1></div>
                             <div className="flex bg-white rounded-lg shadow-sm border p-1 overflow-x-auto hide-scrollbar">
-                                <button onClick={() => setActiveTab('dashboard')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="wallet" size={20} /> 口座・現金</button>
+                                <button onClick={() => setActiveTab('dashboard')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="wallet" size={20} /> ダッシュボード</button>
                                 <button onClick={() => setActiveTab('cashflow')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'cashflow' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="layout-dashboard" size={20} /> キャッシュフロー</button>
                                 <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'history' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="bar-chart-3" size={20} /> 推移グラフ</button>
                                 <button onClick={() => setActiveTab('settings')} className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${activeTab === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}`}><Icon name="settings" size={20} /> 設定</button>
@@ -464,356 +458,261 @@
                         </div>
 
                         {activeTab === 'dashboard' && (
-                            <div className="space-y-6 animate-fade-in">
-                                {/* 口座セクション */}
-                                <div className="rounded-2xl p-6 shadow-md border bg-blue-50/30 border-blue-100">
-                                    <div className="flex items-center justify-between mb-6">
-                                        <h3 className="text-xl font-black flex items-center gap-2 text-blue-700"><Icon name="wallet" size={28} /> 現在の口座残高</h3>
-                                        <div className="text-right"><span className="text-sm text-blue-600 font-bold block mb-1">口座合計</span><span className="font-black text-2xl text-blue-800">{formatCurrency(totalAccounts)}</span></div>
-                                    </div>
-                                    {accounts.length > 0 ? (
-                                        <div className="space-y-4 mb-6">
-                                            {accounts.map((item, index) => {
-                                                const isEditing = editMode?.type === 'account' && editMode?.id === item.id;
-                                                if (isEditing) {
-                                                    return (
-                                                        <div key={item.id} className="bg-blue-50/80 rounded-xl shadow-inner border border-blue-200 p-4 flex flex-col gap-3 animate-fade-in" onClick={e=>e.stopPropagation()}>
-                                                            <div className="flex items-center gap-2 text-blue-800 font-bold text-sm"><Icon name="pencil" size={18}/> 口座情報の編集</div>
-                                                            <div className="flex flex-col sm:flex-row gap-2">
-                                                                <input type="text" value={editMode.name || ''} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-300 outline-none" placeholder="口座名" />
-                                                                <input type="number" value={editMode.amount} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="flex-1 sm:w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-300 outline-none" placeholder="現在残高" />
-                                                            </div>
-                                                            <div className="flex flex-col sm:flex-row gap-2">
-                                                                <input type="number" value={editMode.incomingAmount} onChange={e=>setEditMode({...editMode, incomingAmount: e.target.value})} className="flex-1 sm:w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300 outline-none bg-emerald-50" placeholder="入金予定額" />
-                                                                <input type="text" value={editMode.memo || ''} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-300 outline-none" placeholder="メモ（任意）" />
-                                                            </div>
-                                                            <div className="flex justify-end gap-2 mt-1">
-                                                                <button type="button" onClick={() => setEditMode(null)} className="px-4 py-2 text-sm text-gray-600 font-bold bg-white border border-gray-300 rounded-lg hover:bg-gray-50">キャンセル</button>
-                                                                <button type="button" onClick={saveEdit} className="px-4 py-2 text-sm text-white font-bold bg-blue-600 rounded-lg hover:bg-blue-700">保存する</button>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                }
-                                                const relPays = payments.filter(p => p.accountId === item.id);
-                                                const activeOut = relPays.filter(p => !p.isDone).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-                                                const incAmt = item.isIncomingDone ? 0 : (Number(item.incomingAmount) || 0);
-                                                const expectedBal = (Number(item.amount) || 0) + incAmt - activeOut;
-                                                const isShort = expectedBal < 0;
-                                                return (
-                                                    <div key={item.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:bg-blue-50 hover:shadow-md transition-all" onClick={() => setSelectedAccountPopup(item)}>
-                                                        <div className="p-4 flex">
-                                                            <SortButtons onMoveUp={() => handleMoveItem(accounts, index, -1, setAccounts)} onMoveDown={() => handleMoveItem(accounts, index, 1, setAccounts)} isFirst={index === 0} isLast={index === accounts.length - 1} />
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex justify-between items-start mb-2">
-                                                                    <span className="text-gray-800 font-bold text-lg truncate pr-2">{item.name}</span>
-                                                                    <div className="flex items-center gap-1 shrink-0">
-                                                                        {(Number(item.incomingAmount) > 0) && (
-                                                                            <button type="button" onClick={(e) => toggleAccountIncomingDone(item.id, e)} className={`text-xs px-2 py-1 rounded font-bold flex items-center gap-0.5 border transition-colors ${item.isIncomingDone ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50'}`}>
-                                                                                <Icon name={item.isIncomingDone ? 'check' : 'done'} size={14} /><span>入金{item.isIncomingDone ? '済' : '予定'}</span>
-                                                                            </button>
-                                                                        )}
-                                                                        <button type="button" onClick={(e) => { e.stopPropagation(); startEdit('account', item); }} className="text-gray-400 hover:text-blue-500 p-1 rounded transition-colors"><Icon name="pencil" size={20} /></button>
-                                                                        <button type="button" onClick={(e) => { e.stopPropagation(); requestDelete('account', item); }} className="text-gray-400 hover:text-red-500 p-1 rounded transition-colors"><Icon name="trash-2" size={20} /></button>
-                                                                    </div>
-                                                                </div>
-                                                                {item.memo && <div className="text-xs text-gray-500 mb-3 flex items-start gap-1"><Icon name="message-square" size={14} className="shrink-0 mt-0.5" /> <span className="break-words line-clamp-2">{item.memo}</span></div>}
-                                                                <div className="flex justify-between items-end gap-2">
-                                                                    <div className="flex-1 min-w-0">
-                                                                        <span className="text-[11px] text-gray-500 font-bold uppercase block mb-0.5">現在残高</span><span className="font-bold text-xl text-gray-800 break-words">{formatCurrency(item.amount)}</span>
-                                                                        {(Number(item.incomingAmount) > 0) && (<div className={`text-xs font-bold mt-1 flex items-center gap-1 ${item.isIncomingDone ? 'text-gray-400 line-through font-normal' : 'text-emerald-600'}`}><Icon name="arrow-down-to-line" size={14} /> 予定: +{formatCurrency(item.incomingAmount)}</div>)}
-                                                                    </div>
-                                                                    {(activeOut > 0 || incAmt > 0) && (
-                                                                        <div className="flex-1 text-right pl-2 border-l border-gray-100 min-w-0">
-                                                                            <span className="text-[11px] text-gray-500 font-bold uppercase block mb-0.5">引落後予想</span><span className={`font-bold text-xl break-words ${isShort ? 'text-red-600' : 'text-emerald-600'}`}>{isShort && <Icon name="alert-triangle" size={16} className="inline mr-1 mb-0.5" />}{formatCurrency(expectedBal)}</span>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    ) : (<div className="py-8 text-center bg-white rounded-xl border border-blue-200 border-dashed mb-6"><p className="text-sm text-blue-400">口座が登録されていません。<br/>下から追加してください。</p></div>)}
-                                    <form onSubmit={handleAddAccount} className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-2">
-                                        <div className="flex flex-col sm:flex-row gap-2">
-                                            <input type="text" placeholder="新しい口座名 (例: 三井住友 鳳)" className="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200" value={accName} onChange={e => setAccName(e.target.value)} required />
-                                            <input type="number" placeholder="現在の残高" className="flex-1 sm:max-w-[150px] w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200" value={accAmount} onChange={e => setAccAmount(e.target.value)} />
-                                        </div>
-                                        <div className="flex flex-col sm:flex-row gap-2">
-                                            <input type="number" placeholder="入金予定額（任意）" className="flex-1 sm:max-w-[150px] w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-emerald-50" value={accIncoming} onChange={e => setAccIncoming(e.target.value)} />
-                                            <input type="text" placeholder="メモ（任意）" className="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 bg-gray-50" value={accMemo} onChange={e => setAccMemo(e.target.value)} />
-                                            <button type="submit" className="px-6 py-2 text-white font-bold rounded-lg bg-blue-500 hover:bg-blue-600 flex items-center justify-center gap-1 shrink-0 transition-colors"><Icon name="plus" size={20} /> 追加</button>
-                                        </div>
-                                    </form>
+                            <div className="space-y-4 animate-fade-in">
+                                {/* サブタブ切替 */}
+                                <div className="flex gap-2 mb-6 border-b border-gray-200 pb-2 overflow-x-auto hide-scrollbar">
+                                    <button onClick={() => setDashTab('accounts')} className={`px-4 py-2 text-sm font-bold rounded-t-lg transition-colors flex items-center gap-2 ${dashTab === 'accounts' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-100'}`}><Icon name="wallet" size={18}/>口座と現金</button>
+                                    <button onClick={() => setDashTab('incomes')} className={`px-4 py-2 text-sm font-bold rounded-t-lg transition-colors flex items-center gap-2 ${dashTab === 'incomes' ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-100'}`}><Icon name="arrow-down-to-line" size={18}/>入金予定</button>
+                                    <button onClick={() => setDashTab('payments')} className={`px-4 py-2 text-sm font-bold rounded-t-lg transition-colors flex items-center gap-2 ${dashTab === 'payments' ? 'bg-rose-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-100'}`}><Icon name="arrow-up-from-line" size={18}/>支払い・ローン</button>
                                 </div>
 
-                                {/* 手元現金セクション（新設） */}
-                                <div className="rounded-2xl p-6 shadow-md border bg-amber-50/30 border-amber-100">
-                                    <div className="flex items-center justify-between mb-6">
-                                        <h3 className="text-xl font-black flex items-center gap-2 text-amber-700"><Icon name="payments" size={28} /> 手元現金</h3>
-                                        <div className="text-right"><span className="text-sm text-amber-600 font-bold block mb-1">手元現金合計</span><span className="font-black text-2xl text-amber-800">{formatCurrency(totalWallets)}</span></div>
-                                    </div>
-                                    {wallets.length > 0 ? (
-                                        <div className="space-y-4 mb-6">
-                                            {wallets.map((item, index) => {
-                                                const isEditing = editMode?.type === 'wallet' && editMode?.id === item.id;
-                                                if (isEditing) {
-                                                    return (
-                                                        <div key={item.id} className="bg-amber-50/80 rounded-xl shadow-inner border border-amber-200 p-4 flex flex-col gap-3 animate-fade-in" onClick={e=>e.stopPropagation()}>
-                                                            <div className="flex items-center gap-2 text-amber-800 font-bold text-sm"><Icon name="pencil" size={18}/> 手元現金の編集</div>
-                                                            <div className="flex flex-col sm:flex-row gap-2">
-                                                                <input type="text" value={editMode.name || ''} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-300 outline-none" placeholder="名称" />
-                                                                <input type="number" value={editMode.amount} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="flex-1 sm:w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-300 outline-none" placeholder="現在残高" />
-                                                            </div>
-                                                            <div className="flex flex-col sm:flex-row gap-2">
-                                                                <input type="number" value={editMode.outgoAmount} onChange={e=>setEditMode({...editMode, outgoAmount: e.target.value})} className="flex-1 sm:w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-300 outline-none bg-rose-50" placeholder="消費予定額" />
-                                                                <input type="text" value={editMode.memo || ''} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-amber-300 outline-none" placeholder="メモ（任意）" />
-                                                            </div>
-                                                            <div className="flex items-center gap-4 text-sm">
-                                                                <label className="flex items-center gap-1 font-bold text-amber-800 cursor-pointer">
-                                                                    <input type="checkbox" checked={editMode.isOutgoFixed || false} onChange={e=>setEditMode({...editMode, isOutgoFixed: e.target.checked})} className="w-4 h-4 rounded text-amber-600"/>予定額を毎月固定にする
-                                                                </label>
-                                                            </div>
-                                                            <div className="flex justify-end gap-2 mt-1">
-                                                                <button type="button" onClick={() => setEditMode(null)} className="px-4 py-2 text-sm text-gray-600 font-bold bg-white border border-gray-300 rounded-lg hover:bg-gray-50">キャンセル</button>
-                                                                <button type="button" onClick={saveEdit} className="px-4 py-2 text-sm text-white font-bold bg-amber-600 rounded-lg hover:bg-amber-700">保存する</button>
-                                                            </div>
+                                {/* サブタブ：口座と現金 */}
+                                {dashTab === 'accounts' && (
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
+                                        <div className="rounded-2xl p-5 shadow-sm border bg-blue-50/50 border-blue-100">
+                                            <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-bold flex items-center gap-2 text-blue-700"><Icon name="building-2" size={24} /> 口座残高</h3><div className="text-right"><span className="text-xs text-blue-600 font-bold block">合計</span><span className="font-black text-xl text-blue-800">{formatCurrency(totalAccountsNum)}</span></div></div>
+                                            <div className="space-y-3 mb-4">
+                                                {accounts.map((item, index) => {
+                                                    const isEditing = editMode?.type === 'account' && editMode?.id === item.id;
+                                                    if (isEditing) return (
+                                                        <div key={item.id} className="bg-white rounded-lg p-3 shadow-inner border border-blue-200">
+                                                            <div className="flex gap-2 mb-2"><input type="text" value={editMode.name} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="口座名"/><input type="text" value={editMode.amount} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="w-24 px-2 py-1 text-sm border rounded" placeholder="現在残高"/></div>
+                                                            <div className="flex gap-2 mb-2"><input type="text" value={editMode.incomingAmount} onChange={e=>setEditMode({...editMode, incomingAmount: e.target.value})} className="w-28 px-2 py-1 text-sm border rounded bg-emerald-50" placeholder="入金予定"/><input type="text" value={editMode.memo} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="メモ"/></div>
+                                                            <div className="flex justify-end gap-2"><button type="button" onClick={()=>setEditMode(null)} className="px-3 py-1 text-xs border rounded bg-gray-50">ｷｬﾝｾﾙ</button><button type="button" onClick={saveEdit} className="px-3 py-1 text-xs text-white bg-blue-600 rounded">保存</button></div>
                                                         </div>
                                                     );
-                                                }
-                                                const activeOut = item.isOutgoDone ? 0 : (Number(item.outgoAmount) || 0);
-                                                const expectedBal = (Number(item.amount) || 0) - activeOut;
-                                                const isShort = expectedBal < 0;
-                                                return (
-                                                    <div key={item.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:bg-amber-50 hover:shadow-md transition-all">
-                                                        <div className="p-4 flex">
-                                                            <SortButtons onMoveUp={() => handleMoveItem(wallets, index, -1, setWallets)} onMoveDown={() => handleMoveItem(wallets, index, 1, setWallets)} isFirst={index === 0} isLast={index === wallets.length - 1} />
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex justify-between items-start mb-2">
-                                                                    <span className="text-gray-800 font-bold text-lg truncate pr-2">{item.name}</span>
-                                                                    <div className="flex items-center gap-1 shrink-0">
-                                                                        {(Number(item.outgoAmount) > 0) && (
-                                                                            <button type="button" onClick={(e) => toggleWalletOutgoDone(item.id, e)} className={`text-xs px-2 py-1 rounded font-bold flex items-center gap-0.5 border transition-colors ${item.isOutgoDone ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50'}`}>
-                                                                                <Icon name={item.isOutgoDone ? 'check' : 'done'} size={14} /><span>消費{item.isOutgoDone ? '済' : '予定'}</span>
-                                                                            </button>
-                                                                        )}
-                                                                        <button type="button" onClick={() => startEdit('wallet', item)} className="text-gray-400 hover:text-amber-500 p-1 rounded transition-colors"><Icon name="pencil" size={20} /></button>
-                                                                        <button type="button" onClick={() => requestDelete('wallet', item)} className="text-gray-400 hover:text-red-500 p-1 rounded transition-colors"><Icon name="trash-2" size={20} /></button>
-                                                                    </div>
-                                                                </div>
-                                                                {item.memo && <div className="text-xs text-gray-500 mb-3 flex items-start gap-1"><Icon name="message-square" size={14} className="shrink-0 mt-0.5" /> <span className="break-words line-clamp-2">{item.memo}</span></div>}
-                                                                <div className="flex justify-between items-end gap-2">
-                                                                    <div className="flex-1 min-w-0">
-                                                                        <span className="text-[11px] text-gray-500 font-bold uppercase block mb-0.5">現在残高</span><span className="font-bold text-xl text-gray-800 break-words">{formatCurrency(item.amount)}</span>
-                                                                        {(Number(item.outgoAmount) > 0) && (
-                                                                            <div className={`text-xs font-bold mt-1 flex items-center gap-1 ${item.isOutgoDone ? 'text-gray-400 line-through font-normal' : 'text-rose-600'}`}>
-                                                                                <Icon name="arrow-up-from-line" size={14} /> 予定: -{formatCurrency(item.outgoAmount)} {item.isOutgoFixed && <span className="text-[9px] bg-rose-100 text-rose-800 px-1 rounded ml-1">固定</span>}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                    {(activeOut > 0) && (
-                                                                        <div className="flex-1 text-right pl-2 border-l border-gray-100 min-w-0">
-                                                                            <span className="text-[11px] text-gray-500 font-bold uppercase block mb-0.5">消費後予想</span><span className={`font-bold text-xl break-words ${isShort ? 'text-red-600' : 'text-amber-600'}`}>{isShort && <Icon name="alert-triangle" size={16} className="inline mr-1 mb-0.5" />}{formatCurrency(expectedBal)}</span>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    ) : (<div className="py-8 text-center bg-white rounded-xl border border-amber-200 border-dashed mb-6"><p className="text-sm text-amber-500">手元現金が登録されていません。<br/>下から追加してください。</p></div>)}
-                                    <form onSubmit={handleAddWallet} className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-2">
-                                        <div className="flex flex-col sm:flex-row gap-2">
-                                            <input type="text" placeholder="手元現金名 (例: お財布)" className="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" value={walName} onChange={e => setWalName(e.target.value)} required />
-                                            <input type="number" placeholder="現在の残高" className="flex-1 sm:max-w-[150px] w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" value={walAmount} onChange={e => setWalAmount(e.target.value)} />
-                                        </div>
-                                        <div className="flex flex-col sm:flex-row gap-2">
-                                            <input type="number" placeholder="現金消費予定（任意）" className="flex-1 sm:max-w-[150px] w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-300 bg-rose-50" value={walOutgo} onChange={e => setWalOutgo(e.target.value)} />
-                                            <input type="text" placeholder="メモ（任意）" className="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 bg-gray-50" value={walMemo} onChange={e => setWalMemo(e.target.value)} />
-                                        </div>
-                                        <div className="flex flex-col sm:flex-row justify-between items-center gap-2 mt-1">
-                                            <label className="flex items-center gap-1 text-sm font-bold text-gray-600 cursor-pointer pl-1"><input type="checkbox" checked={walIsFixed} onChange={e => setWalIsFixed(e.target.checked)} className="w-4 h-4 text-amber-600 rounded" />予定額を毎月固定にする</label>
-                                            <button type="submit" className="px-6 py-2 text-white font-bold rounded-lg bg-amber-500 hover:bg-amber-600 flex items-center justify-center gap-1 w-full sm:w-auto shrink-0 transition-colors"><Icon name="plus" size={20} /> 追加</button>
-                                        </div>
-                                    </form>
-                                </div>
-
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    {/* 入金セクション */}
-                                    <div className="rounded-xl p-5 shadow-sm border bg-emerald-50/30 border-emerald-100">
-                                        <div className="flex items-start sm:items-center justify-between mb-4 gap-2 flex-wrap">
-                                            <h3 className="text-lg font-bold flex items-center gap-2 text-emerald-600 shrink-0"><Icon name="arrow-down-to-line" size={24} />入金・預かり予定</h3>
-                                            <div className="text-right">
-                                                {totalAccountIncomes > 0 && <span className="text-[10px] text-emerald-600 font-bold block mb-0.5">口座割当済: -{formatCurrency(totalAccountIncomes)}</span>}
-                                                <span className="text-xs text-gray-500">未済の残額:</span> <span className="font-bold text-lg text-emerald-700">{formatCurrency(remainingIncomes)}</span>
-                                            </div>
-                                        </div>
-                                        {incomes.length > 0 ? (
-                                            <div className="space-y-2 mb-4">
-                                                {incomes.map((item, index) => {
-                                                    const isEditing = editMode?.type === 'income' && editMode?.id === item.id;
-                                                    if (isEditing) {
-                                                        return (
-                                                            <div key={item.id} className="bg-emerald-50/80 rounded-xl shadow-inner border border-emerald-200 p-3 flex flex-col gap-3 animate-fade-in">
-                                                                <div className="flex flex-col sm:flex-row gap-2">
-                                                                    <input type="text" value={editMode.name || ''} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300 outline-none" placeholder="項目名" />
-                                                                    <input type="number" value={editMode.amount || ''} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="flex-1 sm:w-28 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300 outline-none" placeholder="金額" />
-                                                                </div>
-                                                                <div className="flex items-center gap-4 text-sm"><label className="flex items-center gap-1 font-bold text-emerald-800 cursor-pointer"><input type="checkbox" checked={editMode.isFixed || false} onChange={e=>setEditMode({...editMode, isFixed: e.target.checked})} className="w-4 h-4 rounded text-emerald-600"/>固定の入金予定</label></div>
-                                                                <input type="text" value={editMode.memo || ''} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300 outline-none" placeholder="メモ（任意）" />
-                                                                <div className="flex justify-end gap-2 mt-1">
-                                                                    <button type="button" onClick={() => setEditMode(null)} className="px-3 py-1.5 text-xs text-gray-600 font-bold bg-white border border-gray-300 rounded-lg hover:bg-gray-50">キャンセル</button>
-                                                                    <button type="button" onClick={saveEdit} className="px-3 py-1.5 text-xs text-white font-bold bg-emerald-600 rounded-lg hover:bg-emerald-700">保存</button>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    }
+                                                    const relPays = payments.filter(p => p.accountId === item.id);
+                                                    const activeOut = relPays.filter(p => !p.isDone).reduce((s, p) => s + calcAmount(p.amount), 0);
+                                                    const incAmt = item.isIncomingDone ? 0 : calcAmount(item.incomingAmount);
+                                                    const expectedBal = calcAmount(item.amount) + incAmt - activeOut;
                                                     return (
-                                                        <div key={item.id} className={`flex justify-between items-center bg-white p-3 rounded-lg shadow-sm border border-gray-100 ${item.isDone ? 'opacity-40 bg-gray-50' : ''}`}>
-                                                            <div className="flex items-start flex-1 min-w-0 pr-2">
-                                                                <div className="mt-0.5"><SortButtons onMoveUp={() => handleMoveItem(incomes, index, -1, setIncomes)} onMoveDown={() => handleMoveItem(incomes, index, 1, setIncomes)} isFirst={index === 0} isLast={index === incomes.length - 1} /></div>
-                                                                <div className="flex-1 min-w-0">
-                                                                    <div className="flex items-center gap-1 flex-wrap"><span className={`text-gray-700 font-bold truncate block ${item.isDone ? 'line-through text-gray-400' : ''}`}>{item.name}</span>{item.isFixed && <span className="text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-200 px-1.5 rounded font-black whitespace-nowrap">固定</span>}</div>
-                                                                    {item.memo && <div className="text-[11px] text-gray-400 mt-0.5 flex items-start gap-1"><Icon name="message-square" size={14} className="shrink-0 mt-0.5" /> <span className="break-words line-clamp-1">{item.memo}</span></div>}
+                                                        <div key={item.id} className="bg-white rounded-lg p-3 shadow-sm border border-gray-100 flex hover:shadow-md cursor-pointer" onClick={() => setSelectedAccountPopup(item)}>
+                                                            <SortButtons onMoveUp={() => handleMoveItem(accounts, index, -1, setAccounts)} onMoveDown={() => handleMoveItem(accounts, index, 1, setAccounts)} isFirst={index===0} isLast={index===accounts.length-1} />
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex justify-between items-start mb-1">
+                                                                    <span className="font-bold text-gray-800">{item.name}</span>
+                                                                    <div className="flex gap-1 shrink-0">
+                                                                        {calcAmount(item.incomingAmount) > 0 && (
+                                                                            <button type="button" onClick={(e) => toggleAccountIncomingDone(item.id, e)} className={`text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isIncomingDone ? 'bg-emerald-100 text-emerald-800' : 'text-gray-500'}`}><Icon name={item.isIncomingDone ? 'check' : 'done'} size={12}/>入金{item.isIncomingDone?'済':'予定'}</button>
+                                                                        )}
+                                                                        <button type="button" onClick={(e) => { e.stopPropagation(); startEdit('account', item); }} className="text-gray-400 p-0.5"><Icon name="pencil" size={16}/></button><button type="button" onClick={(e) => { e.stopPropagation(); requestDelete('account', item); }} className="text-gray-400 p-0.5"><Icon name="trash-2" size={16}/></button>
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                            <div className="flex items-center gap-1 shrink-0">
-                                                                <span className={`font-bold mr-1 ${item.isDone ? 'text-gray-400' : 'text-gray-800'}`}>{formatCurrency(item.amount)}</span>
-                                                                <button type="button" onClick={() => toggleIncomeDone(item.id)} className={`p-1 rounded transition-colors ${item.isDone ? 'bg-emerald-100 text-emerald-700' : 'text-gray-300 hover:text-emerald-600 hover:bg-gray-50'}`} title={item.isDone ? '未済に戻す' : '入金済みにする'}><Icon name={item.isDone ? 'check-circle-2' : 'done'} size={20} /></button>
-                                                                <button type="button" onClick={() => startEdit('income', item)} className="text-gray-400 hover:text-emerald-500 p-1.5 rounded hover:bg-emerald-50 transition-colors"><Icon name="pencil" size={20} /></button>
-                                                                <button type="button" onClick={() => requestDelete('income', item)} className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"><Icon name="trash-2" size={20} /></button>
+                                                                {item.memo && <div className="text-[10px] text-gray-400 mb-2 truncate"><Icon name="message-square" size={10}/> {item.memo}</div>}
+                                                                <div className="flex justify-between items-end gap-2">
+                                                                    <div className="flex-1"><span className="text-[10px] text-gray-500 block">残高</span><DisplayAmount str={item.amount} className="items-start text-sm text-gray-800"/>
+                                                                        {calcAmount(item.incomingAmount)>0 && <div className={`text-[10px] font-bold mt-0.5 ${item.isIncomingDone?'text-gray-400 line-through font-normal':'text-emerald-600'}`}>+<DisplayAmount str={item.incomingAmount} className="inline-flex flex-row gap-1 items-baseline"/></div>}
+                                                                    </div>
+                                                                    {(activeOut > 0 || incAmt > 0) && (<div className="flex-1 text-right pl-2 border-l border-gray-100"><span className="text-[10px] text-gray-500 block">引落後予想</span><span className={`font-bold text-sm ${expectedBal<0?'text-red-600':'text-emerald-600'}`}>{formatCurrency(expectedBal)}</span></div>)}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     );
                                                 })}
                                             </div>
-                                        ) : (<div className="py-6 text-center bg-white rounded-lg border border-emerald-100 border-dashed mb-4"><p className="text-sm text-emerald-400">予定はありません</p></div>)}
-                                        <form onSubmit={handleAddIncome} className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col gap-2">
-                                            <div className="flex flex-col sm:flex-row gap-2">
-                                                <input type="text" placeholder="項目名 (例: 給料、売電)" className="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200" value={incName} onChange={e => setIncName(e.target.value)} required />
-                                                <input type="number" placeholder="金額" className="flex-1 sm:max-w-[120px] w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200" value={incAmount} onChange={e => setIncAmount(e.target.value)} />
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row gap-2 items-center justify-between">
-                                                <label className="flex items-center gap-1 text-sm font-bold text-gray-600 cursor-pointer pl-1"><input type="checkbox" checked={incIsFixed} onChange={e => setIncIsFixed(e.target.checked)} className="w-4 h-4 text-emerald-600 rounded" />固定の予定</label>
-                                                <div className="flex gap-2 flex-1 sm:justify-end w-full sm:w-auto">
-                                                    <input type="text" placeholder="メモ（任意）" className="flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200 bg-gray-50" value={incMemo} onChange={e => setIncMemo(e.target.value)} />
-                                                    <button type="submit" className="px-4 py-2 text-white font-bold rounded-lg bg-emerald-500 hover:bg-emerald-600 shrink-0 transition-colors flex justify-center items-center"><Icon name="plus" size={20} /></button>
-                                                </div>
-                                            </div>
-                                        </form>
-                                    </div>
+                                            <form onSubmit={handleAddAccount} className="bg-white p-3 rounded-lg border shadow-sm space-y-2">
+                                                <div className="flex gap-2"><input type="text" placeholder="口座名" value={accName} onChange={e=>setAccName(e.target.value)} required className="flex-1 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-300"/><input type="text" placeholder="現在残高 (数式OK)" value={accAmount} onChange={e=>setAccAmount(e.target.value)} className="w-24 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-300"/></div>
+                                                <div className="flex gap-2"><input type="text" placeholder="入金予定" value={accIncoming} onChange={e=>setAccIncoming(e.target.value)} className="w-24 px-2 py-1.5 text-sm border rounded bg-emerald-50 focus:ring-1 focus:ring-emerald-300"/><input type="text" placeholder="メモ" value={accMemo} onChange={e=>setAccMemo(e.target.value)} className="flex-1 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-300"/><button type="submit" className="px-3 py-1.5 bg-blue-600 text-white text-sm font-bold rounded hover:bg-blue-700">追加</button></div>
+                                            </form>
+                                        </div>
 
-                                    {/* 支払いセクション */}
-                                    <div className="rounded-xl p-5 shadow-sm border bg-rose-50/30 border-rose-100 lg:col-span-1">
-                                        <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-bold flex items-center gap-2 text-rose-600"><Icon name="arrow-up-from-line" size={24} />支払い・ローン</h3><span className="font-bold text-lg text-rose-700">未済: {formatCurrency(activePayments)}</span></div>
-                                        {payments.length > 0 ? (
-                                            <div className="space-y-3 mb-4 max-h-[500px] overflow-y-auto pr-2">
-                                                {payments.map((item, index) => {
-                                                    const isEditing = editMode?.type === 'payment' && editMode?.id === item.id;
-                                                    if (isEditing) {
-                                                        return (
-                                                            <div key={item.id} className="bg-rose-50/80 rounded-xl shadow-inner border border-rose-200 p-4 flex flex-col gap-3 animate-fade-in">
-                                                                <div className="flex flex-col sm:flex-row gap-2">
-                                                                    <input type="text" value={editMode.name || ''} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-300 outline-none" placeholder="項目名" />
-                                                                    <input type="number" value={editMode.amount || ''} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="flex-1 sm:w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-300 outline-none" placeholder="請求総額" />
+                                        <div className="rounded-2xl p-5 shadow-sm border bg-amber-50/50 border-amber-100">
+                                            <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-bold flex items-center gap-2 text-amber-700"><Icon name="payments" size={24} /> 手元現金</h3><div className="text-right"><span className="text-xs text-amber-600 font-bold block">合計</span><span className="font-black text-xl text-amber-800">{formatCurrency(totalWalletsNum)}</span></div></div>
+                                            <div className="space-y-3 mb-4">
+                                                {wallets.map((item, index) => {
+                                                    const isEditing = editMode?.type === 'wallet' && editMode?.id === item.id;
+                                                    if (isEditing) return (
+                                                        <div key={item.id} className="bg-white rounded-lg p-3 shadow-inner border border-amber-200">
+                                                            <div className="flex gap-2 mb-2"><input type="text" value={editMode.name} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="名称"/><input type="text" value={editMode.amount} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="w-24 px-2 py-1 text-sm border rounded" placeholder="残高"/></div>
+                                                            <div className="flex gap-2 mb-2"><input type="text" value={editMode.outgoAmount} onChange={e=>setEditMode({...editMode, outgoAmount: e.target.value})} className="w-24 px-2 py-1 text-sm border rounded bg-rose-50" placeholder="消費予定"/><input type="text" value={editMode.memo} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="メモ"/></div>
+                                                            <div className="flex justify-between items-center"><label className="text-[10px] font-bold text-amber-800 flex items-center gap-1"><input type="checkbox" checked={editMode.isOutgoFixed} onChange={e=>setEditMode({...editMode, isOutgoFixed: e.target.checked})}/>毎月固定</label><div className="flex gap-2"><button type="button" onClick={()=>setEditMode(null)} className="px-3 py-1 text-xs border rounded bg-gray-50">ｷｬﾝｾﾙ</button><button type="button" onClick={saveEdit} className="px-3 py-1 text-xs text-white bg-amber-600 rounded">保存</button></div></div>
+                                                        </div>
+                                                    );
+                                                    const activeOut = item.isOutgoDone ? 0 : calcAmount(item.outgoAmount);
+                                                    const expectedBal = calcAmount(item.amount) - activeOut;
+                                                    return (
+                                                        <div key={item.id} className="bg-white rounded-lg p-3 shadow-sm border border-gray-100 flex hover:shadow-md">
+                                                            <SortButtons onMoveUp={() => handleMoveItem(wallets, index, -1, setWallets)} onMoveDown={() => handleMoveItem(wallets, index, 1, setWallets)} isFirst={index===0} isLast={index===wallets.length-1} />
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex justify-between items-start mb-1">
+                                                                    <span className="font-bold text-gray-800">{item.name}</span>
+                                                                    <div className="flex gap-1 shrink-0">
+                                                                        {calcAmount(item.outgoAmount) > 0 && (
+                                                                            <button type="button" onClick={(e) => toggleWalletOutgoDone(item.id, e)} className={`text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isOutgoDone ? 'bg-amber-100 text-amber-800' : 'text-gray-500'}`}><Icon name={item.isOutgoDone ? 'check' : 'done'} size={12}/>消費{item.isOutgoDone?'済':'予定'}</button>
+                                                                        )}
+                                                                        <button type="button" onClick={() => startEdit('wallet', item)} className="text-gray-400 p-0.5"><Icon name="pencil" size={16}/></button><button type="button" onClick={() => requestDelete('wallet', item)} className="text-gray-400 p-0.5"><Icon name="trash-2" size={16}/></button>
+                                                                    </div>
                                                                 </div>
-                                                                <div className="flex flex-col sm:flex-row gap-2">
-                                                                    <select className="flex-1 px-3 py-2 text-sm border rounded-lg bg-white focus:ring-2 focus:ring-rose-300 outline-none" value={editMode.accountId || ''} onChange={e=>setEditMode({...editMode, accountId: e.target.value})}>
-                                                                        <option value="">(口座未設定)</option>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
-                                                                    </select>
-                                                                    <input type="number" min="1" max="31" value={editMode.dueDate || ''} onChange={e=>setEditMode({...editMode, dueDate: e.target.value})} className="w-full sm:w-24 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-300 outline-none" placeholder="引落日" />
-                                                                </div>
-                                                                <div className="flex items-center gap-4 text-sm"><label className="flex items-center gap-1 font-bold text-rose-800 cursor-pointer"><input type="checkbox" checked={editMode.isFixed || false} onChange={e=>setEditMode({...editMode, isFixed: e.target.checked})} className="w-4 h-4 rounded text-rose-600"/>固定費設定</label></div>
-                                                                <input type="text" value={editMode.memo || ''} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-300 outline-none" placeholder="メモ（任意）" />
-                                                                <div className="flex justify-end gap-2 mt-1">
-                                                                    <button type="button" onClick={() => setEditMode(null)} className="px-4 py-2 text-sm text-gray-600 font-bold bg-white border border-gray-300 rounded-lg hover:bg-gray-50">キャンセル</button>
-                                                                    <button type="button" onClick={saveEdit} className="px-4 py-2 text-sm text-white font-bold bg-rose-500 rounded-lg hover:bg-rose-600">保存</button>
+                                                                {item.memo && <div className="text-[10px] text-gray-400 mb-2 truncate"><Icon name="message-square" size={10}/> {item.memo}</div>}
+                                                                <div className="flex justify-between items-end gap-2">
+                                                                    <div className="flex-1"><span className="text-[10px] text-gray-500 block">残高</span><DisplayAmount str={item.amount} className="items-start text-sm text-gray-800"/>
+                                                                        {calcAmount(item.outgoAmount)>0 && <div className={`text-[10px] font-bold mt-0.5 ${item.isOutgoDone?'text-gray-400 line-through font-normal':'text-rose-600'}`}>-<DisplayAmount str={item.outgoAmount} className="inline-flex flex-row gap-1 items-baseline"/></div>}
+                                                                    </div>
+                                                                    {activeOut > 0 && (<div className="flex-1 text-right pl-2 border-l border-gray-100"><span className="text-[10px] text-gray-500 block">消費後予想</span><span className={`font-bold text-sm ${expectedBal<0?'text-red-600':'text-amber-600'}`}>{formatCurrency(expectedBal)}</span></div>)}
                                                                 </div>
                                                             </div>
-                                                        );
-                                                    }
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <form onSubmit={handleAddWallet} className="bg-white p-3 rounded-lg border shadow-sm space-y-2">
+                                                <div className="flex gap-2"><input type="text" placeholder="手元現金名" value={walName} onChange={e=>setWalName(e.target.value)} required className="flex-1 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-amber-300"/><input type="text" placeholder="現在残高" value={walAmount} onChange={e=>setWalAmount(e.target.value)} className="w-24 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-amber-300"/></div>
+                                                <div className="flex gap-2"><input type="text" placeholder="消費予定" value={walOutgo} onChange={e=>setWalOutgo(e.target.value)} className="w-24 px-2 py-1.5 text-sm border rounded bg-rose-50 focus:ring-1 focus:ring-rose-300"/><input type="text" placeholder="メモ" value={walMemo} onChange={e=>setWalMemo(e.target.value)} className="flex-1 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-amber-300"/></div>
+                                                <div className="flex justify-between items-center"><label className="text-[11px] font-bold text-amber-800 flex items-center gap-1"><input type="checkbox" checked={walIsFixed} onChange={e=>setWalIsFixed(e.target.checked)} className="rounded"/>毎月固定</label><button type="submit" className="px-4 py-1.5 bg-amber-500 text-white text-sm font-bold rounded hover:bg-amber-600">追加</button></div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* サブタブ：入金予定 */}
+                                {dashTab === 'incomes' && (
+                                    <div className="rounded-2xl p-5 shadow-sm border bg-emerald-50/50 border-emerald-100 animate-fade-in max-w-3xl mx-auto">
+                                        <div className="flex items-start sm:items-center justify-between mb-4 gap-2 flex-wrap">
+                                            <h3 className="text-lg font-bold flex items-center gap-2 text-emerald-600 shrink-0"><Icon name="arrow-down-to-line" size={24} />入金・預かり予定</h3>
+                                            <div className="text-right">
+                                                {totalAccountIncomes > 0 && <span className="text-[10px] text-emerald-600 font-bold block mb-0.5">口座へ割当済: -{formatCurrency(totalAccountIncomes)}</span>}
+                                                <span className="text-xs text-gray-500">未済リスト残額:</span> <span className="font-bold text-xl text-emerald-700">{formatCurrency(remainingIncomes)}</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-3 mb-6">
+                                            {incomes.map((item, index) => {
+                                                const isEditing = editMode?.type === 'income' && editMode?.id === item.id;
+                                                if (isEditing) return (
+                                                    <div key={item.id} className="bg-white rounded-lg p-3 shadow-inner border border-emerald-200">
+                                                        <div className="flex gap-2 mb-2"><input type="text" value={editMode.name} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="項目名"/><input type="text" value={editMode.amount} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="w-24 px-2 py-1 text-sm border rounded" placeholder="金額"/></div>
+                                                        <div className="flex gap-2 mb-2"><input type="text" value={editMode.memo} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="メモ"/></div>
+                                                        <div className="flex justify-between items-center"><label className="text-[11px] font-bold text-emerald-800 flex items-center gap-1"><input type="checkbox" checked={editMode.isFixed} onChange={e=>setEditMode({...editMode, isFixed: e.target.checked})}/>毎月固定</label><div className="flex gap-2"><button type="button" onClick={()=>setEditMode(null)} className="px-3 py-1 text-xs border rounded bg-gray-50">ｷｬﾝｾﾙ</button><button type="button" onClick={saveEdit} className="px-3 py-1 text-xs text-white bg-emerald-600 rounded">保存</button></div></div>
+                                                    </div>
+                                                );
+                                                return (
+                                                    <div key={item.id} className={`flex justify-between items-center bg-white p-3 rounded-lg shadow-sm border border-gray-100 ${item.isDone ? 'opacity-40 bg-gray-50' : ''}`}>
+                                                        <div className="flex items-start flex-1 min-w-0 pr-2">
+                                                            <SortButtons onMoveUp={() => handleMoveItem(incomes, index, -1, setIncomes)} onMoveDown={() => handleMoveItem(incomes, index, 1, setIncomes)} isFirst={index===0} isLast={index===incomes.length-1} />
+                                                            <div className="flex-1 min-w-0 pt-0.5">
+                                                                <div className="flex items-center gap-2 flex-wrap"><span className={`font-bold text-gray-800 ${item.isDone?'line-through text-gray-400':''}`}>{item.name}</span>{item.isFixed && <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 rounded font-black">固定</span>}</div>
+                                                                {item.memo && <div className="text-[10px] text-gray-400 mt-1 truncate"><Icon name="message-square" size={10}/> {item.memo}</div>}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 shrink-0">
+                                                            <DisplayAmount str={item.amount} className={item.isDone?'text-gray-400':'text-gray-800'} />
+                                                            <button type="button" onClick={() => toggleIncomeDone(item.id)} className={`p-1.5 rounded transition-colors ${item.isDone ? 'bg-emerald-100 text-emerald-700' : 'text-gray-300 hover:text-emerald-600 hover:bg-gray-50'}`}><Icon name={item.isDone ? 'check-circle-2' : 'done'} size={20} /></button>
+                                                            <button type="button" onClick={() => startEdit('income', item)} className="text-gray-300 hover:text-blue-500 p-1"><Icon name="pencil" size={20}/></button>
+                                                            <button type="button" onClick={() => requestDelete('income', item)} className="text-gray-300 hover:text-red-500 p-1"><Icon name="trash-2" size={20}/></button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        <form onSubmit={handleAddIncome} className="bg-white p-4 rounded-xl border shadow-sm space-y-3">
+                                            <div className="flex gap-2"><input type="text" placeholder="入金項目名" value={incName} onChange={e=>setIncName(e.target.value)} required className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300"/><input type="text" placeholder="金額" value={incAmount} onChange={e=>setIncAmount(e.target.value)} className="w-28 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300"/></div>
+                                            <div className="flex gap-2"><input type="text" placeholder="メモ" value={incMemo} onChange={e=>setIncMemo(e.target.value)} className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300"/><button type="submit" className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">追加</button></div>
+                                            <label className="flex items-center gap-2 text-xs font-bold text-gray-600"><input type="checkbox" checked={incIsFixed} onChange={e=>setIncIsFixed(e.target.checked)} className="rounded text-emerald-600 w-4 h-4"/>毎月固定の予定にする</label>
+                                        </form>
+                                    </div>
+                                )}
+
+                                {/* サブタブ：支払い・ローン */}
+                                {dashTab === 'payments' && (
+                                    <div className="animate-fade-in max-w-4xl mx-auto space-y-4">
+                                        {/* カテゴリ別集計パネル */}
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                            {Object.entries(CAT_LABELS).map(([key, data]) => (
+                                                <div key={key} className={`${data.bg} border ${data.border} rounded-xl p-3 flex flex-col items-center text-center`}>
+                                                    <span className={`text-[10px] font-bold ${data.color} flex items-center gap-1 mb-1`}><Icon name={data.icon} size={14}/>{data.label}</span>
+                                                    <span className={`font-black text-lg ${data.color}`}>{formatCurrency(catTotals[key])}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        <div className="rounded-2xl p-5 shadow-sm border bg-rose-50/50 border-rose-100">
+                                            <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-bold flex items-center gap-2 text-rose-600"><Icon name="arrow-up-from-line" size={24} />支払い・ローン予定</h3><span className="font-bold text-lg text-rose-700">未済合計: {formatCurrency(activePayments)}</span></div>
+                                            <div className="space-y-3 mb-6">
+                                                {payments.map((item, index) => {
+                                                    const isEditing = editMode?.type === 'payment' && editMode?.id === item.id;
+                                                    if (isEditing) return (
+                                                        <div key={item.id} className="bg-white rounded-xl shadow-inner border border-rose-200 p-4 space-y-3">
+                                                            <div className="flex gap-2"><input type="text" value={editMode.name} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-rose-300" placeholder="項目名"/><input type="text" value={editMode.amount} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="w-28 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-rose-300" placeholder="請求総額"/></div>
+                                                            <div className="flex gap-2">
+                                                                <select className="flex-1 px-2 py-2 text-sm border rounded bg-white" value={editMode.category} onChange={e=>setEditMode({...editMode, category: e.target.value})}>{Object.entries(CAT_LABELS).map(([k, d])=><option key={k} value={k}>{d.label}</option>)}</select>
+                                                                <select className="flex-1 px-2 py-2 text-sm border rounded bg-white" value={editMode.accountId} onChange={e=>setEditMode({...editMode, accountId: e.target.value})}><option value="">口座未定</option>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
+                                                                <input type="number" min="1" max="31" value={editMode.dueDate||''} onChange={e=>setEditMode({...editMode, dueDate: e.target.value})} className="w-16 px-2 py-2 text-sm border rounded" placeholder="日"/>
+                                                            </div>
+                                                            <div className="flex gap-2"><input type="text" value={editMode.memo||''} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="flex-1 px-3 py-2 text-sm border rounded" placeholder="メモ"/></div>
+                                                            <div className="flex justify-end gap-2"><button type="button" onClick={()=>setEditMode(null)} className="px-4 py-2 text-sm bg-gray-50 border rounded font-bold text-gray-600">キャンセル</button><button type="button" onClick={saveEdit} className="px-4 py-2 text-sm bg-rose-500 text-white font-bold rounded">保存</button></div>
+                                                        </div>
+                                                    );
 
                                                     const isExpanded = expandedPayIds.has(item.id);
                                                     const linkedAccount = accounts.find(a => a.id === item.accountId);
-                                                    const isFixedRow = item.isFixed || (item.subItems || []).some(s => s.isFixed);
+                                                    const itemCat = CAT_LABELS[item.category || 'variable'];
+                                                    
                                                     return (
-                                                        <div key={item.id} className={`bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden transition-all ${item.isDone ? 'opacity-40 bg-gray-50' : ''}`}>
+                                                        <div key={item.id} className={`bg-white rounded-lg shadow-sm border border-gray-100 transition-all ${item.isDone ? 'opacity-40 bg-gray-50' : ''}`}>
                                                             <div className="p-3 flex justify-between items-center">
-                                                                <div className="flex items-start gap-2 flex-1 min-w-0">
-                                                                    <div className="mt-1"><SortButtons onMoveUp={() => handleMoveItem(payments, index, -1, setPayments)} onMoveDown={() => handleMoveItem(payments, index, 1, setPayments)} isFirst={index === 0} isLast={index === payments.length - 1} /></div>
-                                                                    <button type="button" onClick={() => toggleExpand(item.id)} className="text-gray-400 hover:text-gray-700 p-1 mt-0.5 shrink-0 transition-colors bg-gray-50 rounded border border-gray-100">{isExpanded ? <Icon name="chevron-up" size={20} /> : <Icon name="chevron-down" size={20} />}</button>
-                                                                    <div className="min-w-0 pr-2">
-                                                                        <div className="flex items-center gap-2 flex-wrap"><span className={`text-gray-800 font-bold truncate ${item.isDone ? 'line-through text-gray-400' : ''}`}>{item.name}</span>{isFixedRow && <span className="text-[9px] bg-indigo-100 text-indigo-800 border border-indigo-200 px-1.5 rounded font-black whitespace-nowrap">固定費</span>}</div>
-                                                                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500 mt-1.5">
-                                                                            {item.dueDate && <span className="flex items-center gap-1 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100"><Icon name="calendar" size={14} className="text-rose-400" /> {item.dueDate}日引落</span>}
-                                                                            {linkedAccount ? <span className="flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-100 max-w-[100px] truncate"><Icon name="building-2" size={14} className="shrink-0" /><span className="truncate">{linkedAccount.name}</span></span> : <span className="text-gray-400">口座未設定</span>}
+                                                                <div className="flex items-start flex-1 min-w-0 pr-2">
+                                                                    <div className="mt-1"><SortButtons onMoveUp={() => handleMoveItem(payments, index, -1, setPayments)} onMoveDown={() => handleMoveItem(payments, index, 1, setPayments)} isFirst={index===0} isLast={index===payments.length-1} /></div>
+                                                                    <button type="button" onClick={() => toggleExpand(item.id)} className="text-gray-400 p-1 mr-2 mt-0.5 bg-gray-50 rounded border"><Icon name={isExpanded?'chevron-up':'chevron-down'} size={20}/></button>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                                                                            <span className={`font-bold text-gray-800 ${item.isDone?'line-through':''}`}>{item.name}</span>
+                                                                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${itemCat.bg} ${itemCat.color}`}>{itemCat.label}</span>
                                                                         </div>
-                                                                        {item.memo && <div className="text-[11px] text-gray-400 mt-1.5 flex items-start gap-1"><Icon name="message-square" size={14} className="shrink-0 mt-0.5" /> <span className="break-words line-clamp-1">{item.memo}</span></div>}
+                                                                        <div className="flex flex-wrap gap-2 text-[10px] text-gray-500">
+                                                                            {item.dueDate && <span className="bg-gray-50 border px-1.5 py-0.5 rounded flex items-center gap-1"><Icon name="calendar" size={12}/>{item.dueDate}日</span>}
+                                                                            {linkedAccount ? <span className="bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded flex items-center gap-1 max-w-[100px] truncate"><Icon name="building-2" size={12} className="shrink-0"/><span className="truncate">{linkedAccount.name}</span></span> : <span>未設定</span>}
+                                                                        </div>
+                                                                        {item.memo && <div className="text-[10px] text-gray-400 mt-1 flex items-start gap-1"><Icon name="message-square" size={12} className="shrink-0 mt-0.5"/> <span className="truncate">{item.memo}</span></div>}
                                                                     </div>
                                                                 </div>
-                                                                <div className="flex flex-col items-end gap-1.5 ml-1 shrink-0">
-                                                                    <span className={`font-bold text-[15px] break-words ${item.isDone ? 'text-gray-400' : 'text-gray-800'}`}>{formatCurrency(item.amount)}</span>
-                                                                    <div className="flex items-center gap-1">
-                                                                        <button type="button" onClick={() => togglePaymentDone(item.id)} className={`p-1 rounded transition-colors ${item.isDone ? 'bg-rose-100 text-rose-700' : 'text-gray-300 hover:text-rose-600 hover:bg-gray-50'}`} title={item.isDone ? '未引落に戻す' : '引落済みにする'}><Icon name={item.isDone ? 'check-circle-2' : 'done'} size={20} /></button>
-                                                                        <button type="button" onClick={() => startEdit('payment', item)} className="text-gray-400 hover:text-blue-500 p-1.5 rounded hover:bg-blue-50 transition-colors"><Icon name="pencil" size={20} /></button>
-                                                                        <button type="button" onClick={() => requestDelete('payment', item)} className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"><Icon name="trash-2" size={20} /></button>
+                                                                <div className="flex flex-col items-end gap-2 shrink-0">
+                                                                    <DisplayAmount str={item.amount} className={`text-[15px] ${item.isDone?'text-gray-400':'text-gray-800'}`} />
+                                                                    <div className="flex gap-1">
+                                                                        <button type="button" onClick={() => togglePaymentDone(item.id)} className={`p-1.5 rounded ${item.isDone?'bg-rose-100 text-rose-700':'text-gray-300 hover:text-rose-600 hover:bg-rose-50'}`}><Icon name={item.isDone?'check-circle-2':'done'} size={20}/></button>
+                                                                        <button type="button" onClick={() => startEdit('payment', item)} className="text-gray-400 hover:text-blue-500 p-1.5"><Icon name="pencil" size={20}/></button>
+                                                                        <button type="button" onClick={() => requestDelete('payment', item)} className="text-gray-400 hover:text-red-500 p-1.5"><Icon name="trash-2" size={20}/></button>
                                                                     </div>
                                                                 </div>
                                                             </div>
                                                             {isExpanded && (
-                                                                <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex flex-col gap-3">
-                                                                    <div className="text-sm text-gray-600 flex items-center gap-1"><Icon name="info" size={20} className="text-indigo-400" /><span><strong>引落先:</strong> {linkedAccount ? linkedAccount.name : '未指定'}</span></div>
-                                                                    <div className="bg-white rounded-lg border border-gray-200 p-3 shadow-sm">
-                                                                        <h4 className="font-bold text-gray-700 text-[13px] mb-2 border-b border-gray-100 pb-1.5">内訳（カードの中の固定費など）</h4>
-                                                                        {item.subItems && item.subItems.length > 0 ? (
+                                                                <div className="px-4 py-3 bg-gray-50 border-t flex flex-col gap-3">
+                                                                    <div className="bg-white rounded-lg border p-3 shadow-sm">
+                                                                        <h4 className="text-[12px] font-bold text-gray-700 border-b pb-1.5 mb-2">明細内訳（カード内の分類など）</h4>
+                                                                        {item.subItems?.length > 0 ? (
                                                                             <ul className="space-y-3 mb-3">
                                                                                 {item.subItems.map(sub => {
                                                                                     const isSubEditing = editMode?.type === 'subItem' && editMode?.id === sub.id;
-                                                                                    if (isSubEditing) {
-                                                                                        return (
-                                                                                            <li key={sub.id} className="bg-indigo-50/80 p-3 rounded-lg border border-indigo-100 flex flex-col gap-2 shadow-inner">
-                                                                                                <div className="flex gap-2">
-                                                                                                    <input type="text" value={editMode.name || ''} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-300 outline-none" placeholder="内訳名" />
-                                                                                                    <input type="number" value={editMode.amount} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="w-20 px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-300 outline-none" placeholder="金額" />
-                                                                                                </div>
-                                                                                                <input type="text" value={editMode.memo || ''} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-300 outline-none" placeholder="メモ" />
-                                                                                                <div className="flex items-center justify-between gap-2 mt-1">
-                                                                                                    <div className="flex items-center gap-2"><label className="flex items-center gap-1 text-[11px] font-bold text-indigo-900"><input type="checkbox" className="rounded text-indigo-600" checked={editMode.isFixed} onChange={e=>setEditMode({...editMode, isFixed: e.target.checked})} />固定費</label>{editMode.isFixed && <input type="month" className="px-1 py-0.5 text-[10px] border rounded text-gray-600" value={editMode.endDate} onChange={e=>setEditMode({...editMode, endDate: e.target.value})} />}</div>
-                                                                                                    <div className="flex gap-1"><button type="button" onClick={() => setEditMode(null)} className="px-2 py-1 text-[10px] bg-white border border-gray-300 rounded hover:bg-gray-50">閉じる</button><button type="button" onClick={saveEdit} className="px-2 py-1 text-[10px] text-white bg-indigo-600 rounded hover:bg-indigo-700">保存</button></div>
-                                                                                                </div>
-                                                                                            </li>
-                                                                                        );
-                                                                                    }
+                                                                                    if (isSubEditing) return (
+                                                                                        <li key={sub.id} className="bg-indigo-50/80 p-3 rounded-lg border flex flex-col gap-2">
+                                                                                            <div className="flex gap-2"><input type="text" value={editMode.name} onChange={e=>setEditMode({...editMode, name: e.target.value})} className="flex-1 px-2 py-1 text-xs border rounded" placeholder="内訳名"/><input type="text" value={editMode.amount} onChange={e=>setEditMode({...editMode, amount: e.target.value})} className="w-24 px-2 py-1 text-xs border rounded" placeholder="金額"/></div>
+                                                                                            <div className="flex gap-2"><select className="w-24 px-1 py-1 text-xs border rounded" value={editMode.category} onChange={e=>setEditMode({...editMode, category: e.target.value})}>{Object.entries(CAT_LABELS).map(([k,d])=><option key={k} value={k}>{d.label}</option>)}</select><input type="text" value={editMode.memo} onChange={e=>setEditMode({...editMode, memo: e.target.value})} className="flex-1 px-2 py-1 text-xs border rounded" placeholder="メモ"/></div>
+                                                                                            <div className="flex justify-end gap-1"><button type="button" onClick={()=>setEditMode(null)} className="px-2 py-1 text-[10px] bg-white border rounded">ｷｬﾝｾﾙ</button><button type="button" onClick={saveEdit} className="px-2 py-1 text-[10px] text-white bg-indigo-600 rounded">保存</button></div>
+                                                                                        </li>
+                                                                                    );
+                                                                                    const subCat = CAT_LABELS[sub.category || 'variable'];
                                                                                     return (
-                                                                                        <li key={sub.id} className="flex justify-between items-start text-sm border-b border-gray-50 pb-2 last:border-0 last:pb-0">
-                                                                                            <div className="flex flex-col gap-0.5 min-w-0 pr-2">
-                                                                                                <div className="flex items-center gap-2 flex-wrap"><span className="text-gray-800 font-medium">{sub.name}</span>{sub.isFixed && <span className="text-[9px] bg-indigo-50 text-indigo-600 border border-indigo-100 px-1.5 rounded font-bold">固定</span>}{sub.endDate && <span className="text-[10px] text-gray-500 font-bold">{sub.endDate.split('-')[0]}年{sub.endDate.split('-')[1]}月迄</span>}</div>
-                                                                                                {sub.memo && <div className="text-[10px] text-gray-400 flex items-start gap-1"><Icon name="message-square" size={12} className="shrink-0 mt-0.5" /> <span className="break-words line-clamp-1">{sub.memo}</span></div>}
+                                                                                        <li key={sub.id} className="flex justify-between items-start text-sm border-b pb-2 last:border-0 last:pb-0">
+                                                                                            <div className="flex flex-col gap-1 flex-1 min-w-0">
+                                                                                                <div className="flex items-center gap-2"><span className="text-gray-800 font-medium">{sub.name}</span><span className={`text-[9px] px-1.5 rounded font-bold ${subCat.bg} ${subCat.color}`}>{subCat.label}</span></div>
+                                                                                                {sub.memo && <span className="text-[10px] text-gray-400 truncate">{sub.memo}</span>}
                                                                                             </div>
-                                                                                            <div className="flex items-center gap-1.5 shrink-0 mt-0.5"><span className="font-semibold text-gray-700">{formatCurrency(sub.amount)}</span><button type="button" onClick={() => startEdit('subItem', sub, { paymentId: item.id })} className="text-gray-300 hover:text-blue-500 transition-colors"><Icon name="pencil" size={14} /></button><button type="button" onClick={() => handleDeleteSubItem(item.id, sub.id)} className="text-gray-300 hover:text-red-500 transition-colors"><Icon name="trash-2" size={14} /></button></div>
+                                                                                            <div className="flex items-center gap-1.5 shrink-0"><DisplayAmount str={sub.amount} className="text-sm"/><button type="button" onClick={()=>startEdit('subItem', sub, {paymentId: item.id})} className="text-gray-300 hover:text-blue-500"><Icon name="pencil" size={14}/></button><button type="button" onClick={()=>handleDeleteSubItem(item.id, sub.id)} className="text-gray-300 hover:text-red-500"><Icon name="trash-2" size={14}/></button></div>
                                                                                         </li>
                                                                                     );
                                                                                 })}
                                                                             </ul>
-                                                                        ) : (<p className="text-xs text-gray-400 mb-3 text-center py-2">内訳は未登録です</p>)}
-                                                                        {(() => {
-                                                                            const subTotal = (item.subItems || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
-                                                                            const diff = (Number(item.amount) || 0) - subTotal;
-                                                                            return (<div className="flex justify-between items-center border-t border-gray-100 pt-2 text-xs font-bold"><span className="text-gray-400">その他（変動費分）</span><span className={`font-bold ${diff < 0 ? 'text-red-500' : 'text-gray-600'}`}>{formatCurrency(diff)}</span></div>);
+                                                                        ) : <p className="text-xs text-gray-400 text-center py-2">内訳は未登録です</p>}
+                                                                        {(()=>{
+                                                                            const subTotal = (item.subItems||[]).reduce((s, sub) => s + calcAmount(sub.amount), 0);
+                                                                            const diff = calcAmount(item.amount) - subTotal;
+                                                                            return <div className="flex justify-between items-center border-t pt-2 text-xs"><span className="text-gray-500 font-bold">基本カテゴリ分 ({itemCat.label})</span><span className={`font-bold ${diff<0?'text-red-500':'text-gray-700'}`}>{formatCurrency(diff)}</span></div>;
                                                                         })()}
                                                                     </div>
-                                                                    <form onSubmit={(e) => handleAddSubItem(e, item.id)} className="mt-1 flex flex-col gap-2 bg-white p-3 rounded-lg border border-gray-100">
-                                                                        <div className="flex gap-2">
-                                                                            <input type="text" placeholder="内訳名 (例: スマホ代)" className="flex-1 px-2.5 py-1.5 text-xs border rounded-md focus:ring-1 focus:ring-indigo-300" value={subInputs[item.id]?.name || ''} onChange={e => setSubInputs({...subInputs, [item.id]: {...subInputs[item.id], name: e.target.value}})} required />
-                                                                            <input type="number" placeholder="金額" className="w-24 px-2.5 py-1.5 text-xs border rounded-md focus:ring-1 focus:ring-indigo-300" value={subInputs[item.id]?.amount || ''} onChange={e => setSubInputs({...subInputs, [item.id]: {...subInputs[item.id], amount: e.target.value}})} />
-                                                                        </div>
-                                                                        <input type="text" placeholder="内訳のメモ（任意）" className="w-full px-2.5 py-1.5 text-xs border rounded-md bg-gray-50 focus:ring-1 focus:ring-indigo-300" value={subInputs[item.id]?.memo || ''} onChange={e => setSubInputs({...subInputs, [item.id]: {...subInputs[item.id], memo: e.target.value}})} />
-                                                                        <div className="flex items-center justify-between gap-2 mt-1">
-                                                                            <div className="flex items-center gap-3"><label className="flex items-center gap-1 cursor-pointer text-xs font-bold text-gray-500"><input type="checkbox" className="rounded text-indigo-600" checked={subInputs[item.id]?.isFixed === true} onChange={e => setSubInputs({...subInputs, [item.id]: {...subInputs[item.id], isFixed: e.target.checked}})} /><span className="text-gray-600">固定費設定</span></label>{subInputs[item.id]?.isFixed === true && <input type="month" className="px-2 py-1 text-[11px] border rounded-md text-gray-600" value={subInputs[item.id]?.endDate || ''} onChange={e => setSubInputs({...subInputs, [item.id]: {...subInputs[item.id], endDate: e.target.value}})} />}</div>
-                                                                            <button type="submit" className="px-3 py-1.5 bg-gray-800 text-white text-xs font-bold rounded-md hover:bg-gray-700 transition-colors">内訳追加</button>
+                                                                    <form onSubmit={(e) => handleAddSubItem(e, item.id)} className="bg-white p-3 rounded-lg border flex flex-col gap-2">
+                                                                        <div className="flex gap-2"><input type="text" placeholder="内訳名" value={subInputs[item.id]?.name||''} onChange={e=>setSubInputs({...subInputs, [item.id]: {...subInputs[item.id], name: e.target.value}})} required className="flex-1 px-2 py-1.5 text-xs border rounded focus:ring-1 focus:ring-indigo-300"/><input type="text" placeholder="金額" value={subInputs[item.id]?.amount||''} onChange={e=>setSubInputs({...subInputs, [item.id]: {...subInputs[item.id], amount: e.target.value}})} className="w-24 px-2 py-1.5 text-xs border rounded focus:ring-1 focus:ring-indigo-300"/></div>
+                                                                        <div className="flex gap-2 items-center">
+                                                                            <select className="w-24 px-1 py-1.5 text-[10px] font-bold border rounded bg-gray-50 text-gray-700" value={subInputs[item.id]?.category||'variable'} onChange={e=>setSubInputs({...subInputs, [item.id]: {...subInputs[item.id], category: e.target.value}})}>{Object.entries(CAT_LABELS).map(([k,d])=><option key={k} value={k}>{d.label}</option>)}</select>
+                                                                            <input type="text" placeholder="メモ" value={subInputs[item.id]?.memo||''} onChange={e=>setSubInputs({...subInputs, [item.id]: {...subInputs[item.id], memo: e.target.value}})} className="flex-1 px-2 py-1.5 text-xs border rounded bg-gray-50"/>
+                                                                            <button type="submit" className="px-3 py-1.5 bg-gray-800 text-white text-xs font-bold rounded">内訳追加</button>
                                                                         </div>
                                                                     </form>
                                                                 </div>
@@ -822,24 +721,18 @@
                                                     );
                                                 })}
                                             </div>
-                                        ) : (<div className="py-6 text-center bg-white rounded-lg border border-rose-100 border-dashed mb-4"><p className="text-sm text-rose-400">予定はありません</p></div>)}
-                                        <form onSubmit={handleAddPayment} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-3">
-                                            <p className="text-sm font-bold text-gray-700 flex items-center gap-1"><Icon name="plus" size={20} className="text-rose-500" />新しい支払いを追加</p>
-                                            <div className="flex flex-col sm:flex-row gap-3">
-                                                <input type="text" placeholder="項目名 (例: 楽天カード)" className="flex-1 px-3 py-2 text-sm border rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-rose-200" value={payName} onChange={e => setPayName(e.target.value)} required />
-                                                <input type="number" placeholder="請求総額" className="flex-1 px-3 py-2 text-sm border rounded-lg w-full sm:max-w-[150px] focus:outline-none focus:ring-2 focus:ring-rose-200" value={payAmount} onChange={e => setPayAmount(e.target.value)} />
-                                            </div>
-                                            <div className="bg-gray-50 p-3 rounded-lg space-y-3">
-                                                <div className="flex flex-col sm:flex-row gap-3 text-sm">
-                                                    <label className="flex items-center gap-2 flex-1 w-full"><span className="text-gray-600 font-medium w-16 shrink-0">引落口座</span><select className="flex-1 px-2 py-1.5 border rounded-md bg-white w-full" value={payAccountId} onChange={e => setPayAccountId(e.target.value)}><option value="">(未設定)</option>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}</select></label>
-                                                    <label className="flex items-center gap-2 sm:w-auto w-full"><span className="text-gray-600 font-medium shrink-0 sm:w-auto w-16">引落日</span><input type="number" min="1" max="31" placeholder="日" className="flex-1 sm:w-20 px-2 py-1.5 border rounded-md bg-white" value={payDueDate} onChange={e => setPayDueDate(e.target.value)} /></label>
+                                            <form onSubmit={handleAddPayment} className="bg-white p-4 rounded-xl border shadow-sm space-y-3">
+                                                <div className="flex gap-2"><input type="text" placeholder="項目名 (例: 楽天カード、スマホ代)" value={payName} onChange={e=>setPayName(e.target.value)} required className="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200"/><input type="text" placeholder="金額 (数式OK)" value={payAmount} onChange={e=>setPayAmount(e.target.value)} className="w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200"/></div>
+                                                <div className="flex gap-2 bg-gray-50 p-2 rounded-lg">
+                                                    <select value={payCat} onChange={e=>setPayCat(e.target.value)} className="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">{Object.entries(CAT_LABELS).map(([k,d])=><option key={k} value={k}>{d.label}</option>)}</select>
+                                                    <select value={payAccountId} onChange={e=>setPayAccountId(e.target.value)} className="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
+                                                    <input type="number" min="1" max="31" placeholder="日" value={payDueDate} onChange={e=>setPayDueDate(e.target.value)} className="w-16 px-2 py-1.5 text-sm border rounded bg-white"/>
                                                 </div>
-                                                <div className="flex flex-col sm:flex-row gap-2 items-center justify-between pt-1 border-t border-gray-200"><label className="flex items-center gap-1 font-bold text-gray-600 cursor-pointer pl-1"><input type="checkbox" checked={payIsFixed} onChange={e => setPayIsFixed(e.target.checked)} className="w-4 h-4 rounded text-rose-500" />全体を固定費にする</label><input type="text" placeholder="メモ（任意）" className="flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-200 bg-white" value={payMemo} onChange={e => setPayMemo(e.target.value)} /></div>
-                                            </div>
-                                            <button type="submit" className="w-full flex justify-center items-center gap-1 py-2.5 text-white font-bold rounded-lg bg-rose-500 hover:bg-rose-600 shadow-sm transition-colors">追加する</button>
-                                        </form>
+                                                <div className="flex gap-2"><input type="text" placeholder="メモ（任意）" value={payMemo} onChange={e=>setPayMemo(e.target.value)} className="flex-1 px-3 py-2 text-sm border rounded-lg bg-gray-50"/><button type="submit" className="px-6 py-2 bg-rose-500 text-white font-bold rounded-lg hover:bg-rose-600">追加</button></div>
+                                            </form>
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                             </div>
                         )}
 
@@ -847,7 +740,7 @@
                             <div className="bg-white rounded-2xl p-8 shadow-md border border-gray-100 animate-zoom-in">
                                 <h2 className="text-xl font-bold text-gray-800 mb-8 flex items-center gap-2 pb-4 border-b border-gray-100"><Icon name="layout-dashboard" className="text-indigo-600" />今月の全体キャッシュフロー予想（未済計算）</h2>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="p-6 bg-blue-50 rounded-2xl border border-blue-100 flex flex-col justify-between"><div><p className="text-sm text-blue-600 font-bold mb-1">確保している資金</p><p className="text-xs text-blue-400 mb-4">全口座・現金 ＋ 未済の入金総額</p></div><p className="text-3xl font-black text-blue-800">{formatCurrency(totalAccounts + totalWallets + activeAccountIncomes + remainingIncomes)}</p></div>
+                                    <div className="p-6 bg-blue-50 rounded-2xl border border-blue-100 flex flex-col justify-between"><div><p className="text-sm text-blue-600 font-bold mb-1">確保している資金</p><p className="text-xs text-blue-400 mb-4">全口座・現金 ＋ 未済の入金総額</p></div><p className="text-3xl font-black text-blue-800">{formatCurrency(totalAccountsNum + totalWalletsNum + activeAccountIncomes + remainingIncomes)}</p></div>
                                     <div className="p-6 bg-rose-50 rounded-2xl border border-rose-100 flex flex-col justify-between"><div><p className="text-sm text-rose-600 font-bold mb-1">残りの支払い合計</p><p className="text-xs text-rose-400 mb-4">未済の引落・現金消費予定</p></div><p className="text-3xl font-black text-rose-800">{formatCurrency(activePayments + activeWalletsOutgo)}</p></div>
                                     <div className={`p-6 rounded-2xl border-2 flex flex-col justify-between ${activeFinalBalance < 0 ? 'bg-red-50 border-red-300' : 'bg-emerald-50 border-emerald-300 shadow-emerald-100 shadow-lg'}`}><div><p className={`text-sm font-bold flex items-center gap-1.5 mb-1 ${activeFinalBalance < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{activeFinalBalance < 0 ? <Icon name="alert-circle" size={24} /> : <Icon name="check-circle-2" size={24} />}差引予測残高</p><p className={`text-xs mb-4 ${activeFinalBalance < 0 ? 'text-red-400' : 'text-emerald-500'}`}>{activeFinalBalance < 0 ? '資金がショートするリスクがあります' : '引き落とし後も資金は確保できています'}</p></div><p className={`text-4xl font-black tracking-tight ${activeFinalBalance < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(activeFinalBalance)}</p></div>
                                 </div>
@@ -860,9 +753,9 @@
                                     <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 pb-4 border-b border-gray-100">
                                         <div><h2 className="text-xl font-bold text-gray-800">月次推移グラフ</h2><p className="text-sm text-gray-500">毎月の支払い実績額と、月末最終残高の履歴グラフです。</p></div>
                                         <div className="flex flex-wrap items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100 w-full lg:w-auto">
-                                            <div className="text-xs font-bold text-indigo-900 block w-full mb-1">💡 現在の状態を過去データとして手動保存・上書きする</div>
+                                            <div className="text-xs font-bold text-indigo-900 block w-full mb-1">💡 現在の状況を過去の月末残高として保存する</div>
                                             <input type="month" value={manualHistoryMonth} onChange={e => setManualHistoryMonth(e.target.value)} className="text-sm px-2 py-1.5 border rounded bg-white" />
-                                            <button onClick={handleSaveAsPreviousMonth} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center gap-1"><Icon name="save" size={16} /> 指定の月として保存</button>
+                                            <button onClick={() => triggerSaveHistory(manualHistoryMonth)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center gap-1"><Icon name="save" size={16} /> 保存</button>
                                         </div>
                                     </div>
                                     <div className="h-64 mt-8 flex items-end justify-around gap-2 border-b-2 border-gray-200 pb-2 relative overflow-x-auto hide-scrollbar">
@@ -884,14 +777,14 @@
                                             })
                                         )}
                                     </div>
-                                    <div className="flex justify-center gap-4 mt-6 text-xs text-gray-600 flex-wrap"><span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-400 rounded-sm"></div>支払い総額</span><span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-full"></div>最終残高（黒字）</span><span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-red-500 rounded-full"></div>最終残高（赤字）</span></div>
+                                    <div className="flex justify-center gap-4 mt-6 text-xs text-gray-600 flex-wrap"><span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-rose-400 rounded-sm"></div>支払い総額</span><span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-emerald-500 rounded-full"></div>月末残高（黒字）</span><span className="flex items-center gap-1.5"><div className="w-3 h-3 bg-red-500 rounded-full"></div>月末残高（赤字）</span></div>
                                 </div>
                                 <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100">
                                     <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Icon name="pencil" className="text-gray-500"/> 履歴データの編集・修正（手入力）</h3>
                                     {history.length > 0 ? (
                                         <div className="overflow-x-auto">
                                             <table className="w-full text-sm text-left text-gray-500">
-                                                <thead className="text-xs text-gray-700 uppercase bg-gray-50"><tr><th className="px-4 py-3">対象月</th><th className="px-4 py-3">支払い合計額</th><th className="px-4 py-3">最終残高</th><th className="px-4 py-3 text-right">操作</th></tr></thead>
+                                                <thead className="text-xs text-gray-700 uppercase bg-gray-50"><tr><th className="px-4 py-3">対象月</th><th className="px-4 py-3">支払い合計額</th><th className="px-4 py-3">月末残高</th><th className="px-4 py-3 text-right">操作</th></tr></thead>
                                                 <tbody>
                                                     {history.map(h => {
                                                         const isEditing = historyEditMode?.id === h.id;
@@ -926,7 +819,7 @@
                             <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100 animate-zoom-in space-y-8">
                                 <div>
                                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 pb-3 border-b border-gray-100"><Icon name="refresh" className="text-red-500" />手動月替わりリセット</h2>
-                                    <p className="text-sm text-gray-600 mb-4">月替わりの自動判定とは別に、今すぐ「済」マークの全解除と、固定費以外の数値を一括で空欄にしたい場合は以下のボタンを押してください。</p>
+                                    <p className="text-sm text-gray-600 mb-4">今すぐ「済」マークの全解除と、固定費以外の数値を一括で空欄にしたい場合は以下のボタンを押してください。</p>
                                     <button onClick={handleManualResetClick} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-5 rounded-lg text-sm transition-colors flex items-center gap-1 shadow-sm"><Icon name="refresh" size={18} />今すぐ一括リセットを実行</button>
                                 </div>
                                 <div>
