@@ -1029,14 +1029,19 @@
                         // --- 収入の積み上げ作成 ---
                         let incBarsHTML = '';
                         const incDetails = data.incomeDetails || (incomeValue > 0 ? [{name: '過去の収入', amount: incomeValue}] : []);
-                        if (incDetails.length === 0) {
+                        
+                        if (s.chartMode === 'all') {
                             incBarsHTML = `<div class="w-full h-full bg-emerald-300 rounded-t-[2px]"></div>`;
                         } else {
-                            incDetails.forEach(d => {
-                                const h = (d.amount / incomeValue) * 100;
-                                const color = App.getColorForName(d.name);
-                                incBarsHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
-                            });
+                            if (incDetails.length === 0) {
+                                incBarsHTML = `<div class="w-full h-full bg-emerald-300 rounded-t-[2px]"></div>`;
+                            } else {
+                                incDetails.forEach(d => {
+                                    const h = (d.amount / incomeValue) * 100;
+                                    const color = App.getColorForName(d.name);
+                                    incBarsHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
+                                });
+                            }
                         }
 
                         // --- 支払いの積み上げ作成（カテゴリ別） ---
@@ -1057,49 +1062,25 @@
                             payBarsCatHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
                         }
 
-                        // --- 支払いの積み上げ作成（項目別） ---
-                        let payBarsItemHTML = '';
-                        let payItemsMap = {};
-                        if (data.details) {
-                            Object.keys(data.details).forEach(cat => {
-                                data.details[cat].forEach(d => {
-                                    if(!payItemsMap[d.name]) payItemsMap[d.name] = 0;
-                                    payItemsMap[d.name] += d.amount;
-                                });
-                            });
-                        } else if (paymentValue > 0) {
-                            payItemsMap['過去の支払い'] = paymentValue;
-                        }
-                        const payItemNames = Object.keys(payItemsMap);
-                        if (payItemNames.length === 0) {
-                            payBarsItemHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
-                        } else {
-                            payItemNames.forEach(name => {
-                                const h = (payItemsMap[name] / paymentValue) * 100;
-                                const color = App.getColorForName(name);
-                                payBarsItemHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
-                            });
-                        }
-
-                        // ★ モードによる棒の出し分け（太さ1/3対応のため幅をw-2.5にスリム化）
+                        // ★ モードによる棒の出し分け（太さ1/3対応のため幅をw-3.5等にスリム化）
                         let visibleBars = '';
                         if (s.chartMode === 'all') {
                             visibleBars = `
                                 <div class="flex items-end justify-center gap-1 w-full h-full relative z-10">
-                                    <div class="w-3 bg-emerald-300 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${incomeHeight}%;">${incBarsHTML}</div>
-                                    <div class="w-3 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${paymentHeight}%;">${payBarsCatHTML}</div>
+                                    <div class="w-3.5 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${incomeHeight}%;">${incBarsHTML}</div>
+                                    <div class="w-3.5 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${paymentHeight}%;">${payBarsCatHTML}</div>
                                 </div>
                             `;
                         } else if (s.chartMode === 'pay_cat') {
-                            visibleBars = `<div class="w-3.5 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${paymentHeight}%;">${payBarsCatHTML}</div>`;
+                            visibleBars = `<div class="w-4 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${paymentHeight}%;">${payBarsCatHTML}</div>`;
                         } else if (s.chartMode === 'pay_item') {
-                            visibleBars = `<div class="w-3.5 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${paymentHeight}%;">${payBarsItemHTML}</div>`;
+                            visibleBars = `<div class="w-4 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${paymentHeight}%;">${payBarsItemHTML}</div>`;
                         } else if (s.chartMode === 'inc_item') {
-                            visibleBars = `<div class="w-3.5 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${incomeHeight}%;">${incBarsHTML}</div>`;
+                            visibleBars = `<div class="w-4 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${incomeHeight}%;">${incBarsHTML}</div>`;
                         }
 
                         html += `
-                                <div class="flex flex-col items-center flex-1 min-w-[50px] h-full relative cursor-pointer group outline-none" onclick="App.selectHistory('${data.id}')" tabindex="0">
+                                <div class="flex flex-col items-center flex-1 min-w-[65px] h-full relative cursor-pointer group outline-none" onclick="App.selectHistory('${data.id}')" tabindex="0">
                                     <div class="opacity-0 group-focus:opacity-100 md:group-hover:opacity-100 transition-opacity absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs p-3 rounded-xl pointer-events-none z-50 whitespace-nowrap shadow-xl">
                                         <div class="absolute -bottom-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 bg-gray-800 rotate-45"></div>
                                         <div class="relative z-10">
@@ -1112,7 +1093,7 @@
                                     <div class="w-full h-full flex justify-center items-end relative transition-all duration-300 ${isSelected ? 'opacity-100 drop-shadow-md scale-[1.15]' : (s.selectedHistoryId ? 'opacity-40 grayscale-[50%]' : 'opacity-100 hover:opacity-80')}">
                                         ${visibleBars}
                                         <!-- 月末残高マーカー -->
-                                        <div class="absolute w-8 h-1 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -2)}%; left:50%; transform:translateX(-50%);"></div>
+                                        <div class="absolute w-10 h-1 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -2)}%; left:50%; transform:translateX(-50%);"></div>
                                     </div>
                                     <span class="text-[10px] ${isSelected ? 'text-indigo-600 font-black' : 'text-gray-500 font-bold'} mt-2 whitespace-nowrap absolute -bottom-6">${escapeHTML(data.label)}</span>
                                 </div>
@@ -1128,7 +1109,15 @@
                 
                 // モード別の凡例
                 let legendHTML = '';
-                if (s.chartMode === 'all' || s.chartMode === 'pay_cat') {
+                if (s.chartMode === 'all') {
+                    legendHTML = `
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-emerald-300 rounded-sm"></div>収入合計</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-purple-400 rounded-sm"></div>ローン</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></div>固定費</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-rose-400 rounded-sm"></div>変動費</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-emerald-400 rounded-sm"></div>投資</span>
+                    `;
+                } else if (s.chartMode === 'pay_cat') {
                     legendHTML = `
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-purple-400 rounded-sm"></div>ローン</span>
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></div>固定費</span>
