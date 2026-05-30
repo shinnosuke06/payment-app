@@ -11,7 +11,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>毎月の支払い管理</title>
     
-    <!-- ReactやBabelはエラーの原因となるため完全に削除し、Tailwind CSSとアイコンのみを使用します -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
 
@@ -41,16 +40,14 @@
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans pb-24">
-    <!-- アプリケーションの描画領域 -->
     <div id="app"></div>
 
     <script>
         // ----------------------------------------------------
         // アプリケーションの全ロジック（純粋なJavaScript）
         // ----------------------------------------------------
-        const STORAGE_KEY = 'mpm_vanilla_v1_';
+        const STORAGE_KEY = 'mpm_vanilla_v2_';
 
-        // XSS防止用エスケープ関数
         const escapeHTML = (str) => {
             return String(str || '')
                 .replace(/&/g, "&amp;")
@@ -60,7 +57,6 @@
                 .replace(/'/g, "&#039;");
         };
 
-        // カテゴリ定義
         const CAT_LABELS = {
             'loan': { label: 'ローン', icon: 'home', color: 'text-purple-600', bg: 'bg-purple-100', border: 'border-purple-200' },
             'fixed': { label: '固定費', icon: 'receipt_long', color: 'text-indigo-600', bg: 'bg-indigo-100', border: 'border-indigo-200' },
@@ -84,30 +80,15 @@
 
         const App = {
             state: {
-                activeTab: 'dashboard',
-                dashTab: 'accounts',
-                accounts: [],
-                wallets: [],
-                incomes: [],
-                payments: [],
-                history: [],
-                expandedPayIds: new Set(),
-                editMode: null, // {type, id}
-                historyEditMode: null, // id
-                deleteTarget: null, // {type, id, name}
-                selectedAccountPopup: null, // id
-                preSaveModal: null, // {id, label, payment, balance}
-                showAutoSaveModal: false,
-                confirmImportData: null,
-                showSuccessModal: false,
-                exportData: '',
-                importMsg: { text: '', isError: false },
-                copySuccess: false,
-                saveMonthStr: '', 
-                manualHistoryMonth: '',
+                activeTab: 'dashboard', dashTab: 'accounts',
+                accounts: [], wallets: [], incomes: [], payments: [], history: [],
+                expandedPayIds: new Set(), editMode: null, historyEditMode: null, deleteTarget: null,
+                selectedAccountPopup: null, preSaveModal: null, showAutoSaveModal: false,
+                confirmImportData: null, showSuccessModal: false,
+                exportData: '', importData: '', importMsg: { text: '', isError: false }, copySuccess: false,
+                saveMonthStr: '', manualHistoryMonth: '',
             },
 
-            // --- ユーティリティ ---
             getIconHTML: function(name, size = 24, className = '') {
                 const mappedName = ICON_MAP[name] || name;
                 return `<span class="material-symbols-outlined ${className}" style="font-size: ${size}px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;">${mappedName}</span>`;
@@ -124,14 +105,11 @@
                     if (!sanitized) return 0;
                     const tokens = sanitized.match(/[+\-*/]|[^+\-*/]+/g);
                     if (!tokens) return 0;
-                    
-                    let stack = [];
-                    let currentOp = '+';
+                    let stack = [], currentOp = '+';
                     for (let i = 0; i < tokens.length; i++) {
                         const token = tokens[i];
-                        if (['+', '-', '*', '/'].includes(token)) {
-                            currentOp = token;
-                        } else {
+                        if (['+', '-', '*', '/'].includes(token)) { currentOp = token; } 
+                        else {
                             let num = parseFloat(token) || 0;
                             if (currentOp === '+') stack.push(num);
                             else if (currentOp === '-') stack.push(-num);
@@ -140,9 +118,7 @@
                         }
                     }
                     return Math.floor(stack.reduce((sum, val) => sum + val, 0));
-                } catch (e) {
-                    return 0;
-                }
+                } catch (e) { return 0; }
             },
 
             formatCurrency: function(amountStr) {
@@ -154,45 +130,38 @@
                 const num = App.calcAmount(str);
                 const strVal = String(str || '');
                 const hasMath = /[+\-*/]/.test(strVal.replace(/[＋－＊／]/g, '+'));
-                return `
-                    <div class="flex flex-col items-end ${className}">
-                        <span class="font-bold">${App.formatCurrency(num)}</span>
-                        ${hasMath ? `<span class="text-[10px] text-gray-400 font-mono -mt-1 tracking-tighter">(${escapeHTML(str)})</span>` : ''}
-                    </div>
-                `;
+                return `<div class="flex flex-col items-end ${className}"><span class="font-bold">${App.formatCurrency(num)}</span>${hasMath ? `<span class="text-[10px] text-gray-400 font-mono -mt-1 tracking-tighter">(${escapeHTML(str)})</span>` : ''}</div>`;
             },
 
             getCurrentMonthStr: function() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; },
             getPreviousMonthStr: function() { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; },
             cleanInput: function(val) { return String(val || '').replace(/,/g, ''); },
 
-            // --- データロードと保存 ---
-            safeLoadArray: function(key1, key2) {
-                try {
-                    const data = localStorage.getItem(key1) || localStorage.getItem(key2);
-                    if (data) {
-                        const parsed = JSON.parse(data);
-                        if (Array.isArray(parsed)) return parsed;
-                    }
-                } catch(e) { console.error("データ読込エラー:", e); }
+            safeLoadArray: function(keys) {
+                for (let key of keys) {
+                    try {
+                        const data = localStorage.getItem(key);
+                        if (data) {
+                            const parsed = JSON.parse(data);
+                            if (Array.isArray(parsed)) return parsed;
+                        }
+                    } catch(e) { console.error("データ読込エラー:", e); }
+                }
                 return [];
             },
 
             loadData: function() {
-                App.state.accounts = App.safeLoadArray(STORAGE_KEY + 'accounts', 'mpm_v14_accounts');
-                App.state.wallets = App.safeLoadArray(STORAGE_KEY + 'wallets', 'mpm_v14_wallets');
-                App.state.incomes = App.safeLoadArray(STORAGE_KEY + 'incomes', 'mpm_v14_incomes');
+                App.state.accounts = App.safeLoadArray([STORAGE_KEY + 'accounts', 'mpm_vanilla_v1_accounts', 'mpm_v14_accounts', 'mpm_v13_accounts', 'mpm_v12_accounts', 'mpm_v11_accounts']);
+                App.state.wallets = App.safeLoadArray([STORAGE_KEY + 'wallets', 'mpm_vanilla_v1_wallets', 'mpm_v14_wallets', 'mpm_v13_wallets', 'mpm_v12_wallets', 'mpm_v11_wallets']);
+                App.state.incomes = App.safeLoadArray([STORAGE_KEY + 'incomes', 'mpm_vanilla_v1_incomes', 'mpm_v14_incomes', 'mpm_v13_incomes', 'mpm_v12_incomes', 'mpm_v11_incomes']);
                 
-                const rawPayments = App.safeLoadArray(STORAGE_KEY + 'payments', 'mpm_v14_payments');
+                const rawPayments = App.safeLoadArray([STORAGE_KEY + 'payments', 'mpm_vanilla_v1_payments', 'mpm_v14_payments', 'mpm_v13_payments', 'mpm_v12_payments', 'mpm_v11_payments']);
                 App.state.payments = rawPayments.map(p => ({
-                    ...p, 
-                    category: p.category || (p.isFixed ? 'fixed' : 'variable'), 
-                    subItems: (Array.isArray(p.subItems) ? p.subItems : []).map(s => ({
-                        ...s, category: s.category || (s.isFixed ? 'fixed' : 'variable')
-                    }))
+                    ...p, category: p.category || (p.isFixed ? 'fixed' : 'variable'), 
+                    subItems: (Array.isArray(p.subItems) ? p.subItems : []).map(s => ({...s, category: s.category || (s.isFixed ? 'fixed' : 'variable')}))
                 }));
                 
-                App.state.history = App.safeLoadArray(STORAGE_KEY + 'history', 'mpm_v14_history');
+                App.state.history = App.safeLoadArray([STORAGE_KEY + 'history', 'mpm_vanilla_v1_history', 'mpm_v14_history', 'mpm_v13_history', 'mpm_v12_history', 'mpm_v11_history']);
                 App.state.saveMonthStr = App.getCurrentMonthStr();
                 App.state.manualHistoryMonth = App.getPreviousMonthStr();
             },
@@ -205,7 +174,6 @@
                 localStorage.setItem(STORAGE_KEY + 'history', JSON.stringify(App.state.history));
             },
 
-            // --- 集計計算 ---
             totals: {},
             calculateTotals: function() {
                 const s = App.state;
@@ -214,7 +182,6 @@
                 let activeWalletsOutgo = 0;
                 let activeIncomesList = 0, totalIncomesList = 0;
                 let activePayments = 0, totalPaymentsNum = 0;
-                
                 const catTotals = { loan: 0, fixed: 0, variable: 0, investment: 0 };
 
                 s.accounts.forEach(a => {
@@ -223,23 +190,19 @@
                     totalAccountIncomes += inc;
                     if (!a.isIncomingDone) activeAccountIncomes += inc;
                 });
-
                 s.wallets.forEach(w => {
                     totalWalletsNum += App.calcAmount(w.amount);
                     if (!w.isOutgoDone) activeWalletsOutgo += App.calcAmount(w.outgoAmount);
                 });
-
                 s.incomes.forEach(i => {
                     const amt = App.calcAmount(i.amount);
                     totalIncomesList += amt;
                     if (!i.isDone) activeIncomesList += amt;
                 });
-
                 s.payments.forEach(p => {
                     const pAmt = App.calcAmount(p.amount);
                     totalPaymentsNum += pAmt;
                     if (!p.isDone) activePayments += pAmt;
-                    
                     if (!p.isDone) {
                         let subTotal = 0;
                         if (p.subItems && p.subItems.length > 0) {
@@ -262,91 +225,39 @@
                 const activeFinalBalance = totalAccountsNum + totalWalletsNum + activeAccountIncomes + remainingIncomes - activePayments - activeWalletsOutgo;
                 const calculatedEndBalance = totalAccountsNum + totalWalletsNum;
 
-                App.totals = {
-                    totalAccountsNum, totalWalletsNum, activeAccountIncomes, totalAccountIncomes,
-                    activeWalletsOutgo, activeIncomesList, totalIncomesList, remainingIncomes,
-                    activePayments, totalPaymentsNum, catTotals, activeFinalBalance, calculatedEndBalance
-                };
+                App.totals = { totalAccountsNum, totalWalletsNum, activeAccountIncomes, totalAccountIncomes, activeWalletsOutgo, activeIncomesList, totalIncomesList, remainingIncomes, activePayments, totalPaymentsNum, catTotals, activeFinalBalance, calculatedEndBalance };
             },
 
-            // --- アクション群 ---
-            setTab: function(tab) {
-                App.state.activeTab = tab;
-                App.render();
-            },
-            setDashTab: function(tab) {
-                App.state.dashTab = tab;
-                App.render();
-            },
+            setTab: function(tab) { App.state.activeTab = tab; App.render(); },
+            setDashTab: function(tab) { App.state.dashTab = tab; App.render(); },
             
-            // --- フォーム送信アクション ---
             addAccount: function(e, form) {
                 e.preventDefault();
-                App.state.accounts.push({
-                    id: Date.now(),
-                    name: form.accName.value,
-                    amount: App.cleanInput(form.accAmount.value),
-                    incomingAmount: App.cleanInput(form.accIncoming.value),
-                    isIncomingDone: false,
-                    memo: form.accMemo.value
-                });
+                App.state.accounts.push({ id: Date.now(), name: form.accName.value, amount: App.cleanInput(form.accAmount.value), incomingAmount: App.cleanInput(form.accIncoming.value), isIncomingDone: false, memo: form.accMemo.value });
                 App.saveData(); App.render();
             },
             addWallet: function(e, form) {
                 e.preventDefault();
-                App.state.wallets.push({
-                    id: Date.now(),
-                    name: form.walName.value,
-                    amount: App.cleanInput(form.walAmount.value),
-                    outgoAmount: App.cleanInput(form.walOutgo.value),
-                    isOutgoDone: false,
-                    isOutgoFixed: form.walIsFixed.checked,
-                    memo: form.walMemo.value
-                });
+                App.state.wallets.push({ id: Date.now(), name: form.walName.value, amount: App.cleanInput(form.walAmount.value), outgoAmount: App.cleanInput(form.walOutgo.value), isOutgoDone: false, isOutgoFixed: form.walIsFixed.checked, memo: form.walMemo.value });
                 App.saveData(); App.render();
             },
             addIncome: function(e, form) {
                 e.preventDefault();
-                App.state.incomes.push({
-                    id: Date.now(),
-                    name: form.incName.value,
-                    amount: App.cleanInput(form.incAmount.value),
-                    isFixed: form.incIsFixed.checked,
-                    isDone: false,
-                    memo: form.incMemo.value
-                });
+                App.state.incomes.push({ id: Date.now(), name: form.incName.value, amount: App.cleanInput(form.incAmount.value), isFixed: form.incIsFixed.checked, isDone: false, memo: form.incMemo.value });
                 App.saveData(); App.render();
             },
             addPayment: function(e, form) {
                 e.preventDefault();
-                App.state.payments.push({
-                    id: Date.now(),
-                    name: form.payName.value,
-                    amount: App.cleanInput(form.payAmount.value),
-                    dueDate: form.payDueDate.value ? Number(form.payDueDate.value) : null,
-                    accountId: form.payAccountId.value ? Number(form.payAccountId.value) : '',
-                    category: form.payCat.value,
-                    isDone: false,
-                    memo: form.payMemo.value,
-                    subItems: []
-                });
+                App.state.payments.push({ id: Date.now(), name: form.payName.value, amount: App.cleanInput(form.payAmount.value), dueDate: form.payDueDate.value ? Number(form.payDueDate.value) : null, accountId: form.payAccountId.value ? Number(form.payAccountId.value) : '', category: form.payCat.value, isDone: false, memo: form.payMemo.value, subItems: [] });
                 App.saveData(); App.render();
             },
             addSubItem: function(e, form, paymentId) {
                 e.preventDefault();
-                const newItem = {
-                    id: Date.now(),
-                    name: form.subName.value,
-                    amount: App.cleanInput(form.subAmount.value),
-                    category: form.subCat.value,
-                    endDate: form.subEndDate ? form.subEndDate.value : '',
-                    memo: form.subMemo.value
-                };
+                const newItem = { id: Date.now(), name: form.subName.value, amount: App.cleanInput(form.subAmount.value), category: form.subCat.value, endDate: form.subEndDate ? form.subEndDate.value : '', memo: form.subMemo.value };
                 App.state.payments = App.state.payments.map(p => p.id === paymentId ? { ...p, subItems: [...(p.subItems||[]), newItem] } : p);
                 App.saveData(); App.render();
             },
 
-            // --- 状態切り替えアクション ---
             toggleDone: function(type, id, e) {
                 if (e) e.stopPropagation();
                 if (type === 'account') App.state.accounts = App.state.accounts.map(a => a.id === id ? { ...a, isIncomingDone: !a.isIncomingDone } : a);
@@ -357,16 +268,10 @@
             },
             toggleExpand: function(id, e) {
                 if (e) e.stopPropagation();
-                if (App.state.expandedPayIds.has(id)) App.state.expandedPayIds.delete(id);
-                else App.state.expandedPayIds.add(id);
+                if (App.state.expandedPayIds.has(id)) App.state.expandedPayIds.delete(id); else App.state.expandedPayIds.add(id);
                 App.render();
             },
-            toggleSubFixed: function(checkbox, idStr) {
-                const el = document.getElementById(idStr);
-                if (el) el.style.display = checkbox.checked ? 'inline-block' : 'none';
-            },
 
-            // --- 並び替えと削除 ---
             moveItem: function(type, index, direction, e) {
                 if (e) e.stopPropagation();
                 let list = App.state[type + 's'];
@@ -375,24 +280,13 @@
                 [list[index], list[newIndex]] = [list[newIndex], list[index]];
                 App.saveData(); App.render();
             },
-            requestDelete: function(type, id, name, e) {
-                if (e) e.stopPropagation();
-                App.state.deleteTarget = { type, id, name };
-                App.render();
-            },
+            requestDelete: function(type, id, name, e) { if (e) e.stopPropagation(); App.state.deleteTarget = { type, id, name }; App.render(); },
             executeDelete: function() {
-                const t = App.state.deleteTarget;
-                if (!t) return;
-                if (t.type === 'account') {
-                    App.state.accounts = App.state.accounts.filter(item => item.id !== t.id);
-                    App.state.payments = App.state.payments.map(p => p.accountId === t.id ? { ...p, accountId: '' } : p);
-                } else if (t.type === 'subItem') {
-                    App.state.payments = App.state.payments.map(p => ({ ...p, subItems: (p.subItems||[]).filter(s => s.id !== t.id) }));
-                } else {
-                    App.state[t.type + 's'] = App.state[t.type + 's'].filter(item => item.id !== t.id);
-                }
-                App.state.deleteTarget = null;
-                App.saveData(); App.render();
+                const t = App.state.deleteTarget; if (!t) return;
+                if (t.type === 'account') { App.state.accounts = App.state.accounts.filter(item => item.id !== t.id); App.state.payments = App.state.payments.map(p => p.accountId === t.id ? { ...p, accountId: '' } : p); } 
+                else if (t.type === 'subItem') { App.state.payments = App.state.payments.map(p => ({ ...p, subItems: (p.subItems||[]).filter(s => s.id !== t.id) })); } 
+                else { App.state[t.type + 's'] = App.state[t.type + 's'].filter(item => item.id !== t.id); }
+                App.state.deleteTarget = null; App.saveData(); App.render();
             },
             closeModal: function(modalName) {
                 App.state[modalName] = null;
@@ -400,85 +294,45 @@
                 if (modalName === 'showSuccessModal') App.state.showSuccessModal = false;
                 App.render();
             },
-            openAccountPopup: function(id) {
-                App.state.selectedAccountPopup = id;
-                App.render();
-            },
+            openAccountPopup: function(id) { App.state.selectedAccountPopup = id; App.render(); },
 
-            // --- 編集モード ---
-            startEdit: function(type, id, e) {
-                if (e) e.stopPropagation();
-                App.state.editMode = { type, id };
-                App.render();
-            },
-            cancelEdit: function(e) {
-                if (e) e.stopPropagation();
-                App.state.editMode = null;
-                App.render();
-            },
+            startEdit: function(type, id, e) { if (e) e.stopPropagation(); App.state.editMode = { type, id }; App.render(); },
+            cancelEdit: function(e) { if (e) e.stopPropagation(); App.state.editMode = null; App.render(); },
             saveEdit: function(e, type, id, paymentId) {
-                e.preventDefault();
-                const form = e.target;
-                if (type === 'account') {
-                    App.state.accounts = App.state.accounts.map(a => a.id === id ? { ...a, name: form.name.value, amount: App.cleanInput(form.amount.value), incomingAmount: App.cleanInput(form.incomingAmount.value), memo: form.memo.value } : a);
-                } else if (type === 'wallet') {
-                    App.state.wallets = App.state.wallets.map(w => w.id === id ? { ...w, name: form.name.value, amount: App.cleanInput(form.amount.value), outgoAmount: App.cleanInput(form.outgoAmount.value), isOutgoFixed: form.isOutgoFixed.checked, memo: form.memo.value } : w);
-                } else if (type === 'income') {
-                    App.state.incomes = App.state.incomes.map(i => i.id === id ? { ...i, name: form.name.value, amount: App.cleanInput(form.amount.value), isFixed: form.isFixed.checked, memo: form.memo.value } : i);
-                } else if (type === 'payment') {
-                    App.state.payments = App.state.payments.map(p => p.id === id ? { ...p, name: form.name.value, amount: App.cleanInput(form.amount.value), dueDate: form.dueDate.value ? Number(form.dueDate.value) : null, accountId: form.accountId.value ? Number(form.accountId.value) : '', category: form.category.value, memo: form.memo.value } : p);
-                } else if (type === 'subItem') {
-                    App.state.payments = App.state.payments.map(p => {
-                        if (p.id === paymentId) {
-                            return { ...p, subItems: p.subItems.map(s => s.id === id ? { ...s, name: form.name.value, amount: App.cleanInput(form.amount.value), category: form.category.value, endDate: form.endDate ? form.endDate.value : '', memo: form.memo.value } : s) };
-                        }
-                        return p;
-                    });
-                }
-                App.state.editMode = null;
-                App.saveData(); App.render();
+                e.preventDefault(); const form = e.target;
+                if (type === 'account') App.state.accounts = App.state.accounts.map(a => a.id === id ? { ...a, name: form.name.value, amount: App.cleanInput(form.amount.value), incomingAmount: App.cleanInput(form.incomingAmount.value), memo: form.memo.value } : a);
+                else if (type === 'wallet') App.state.wallets = App.state.wallets.map(w => w.id === id ? { ...w, name: form.name.value, amount: App.cleanInput(form.amount.value), outgoAmount: App.cleanInput(form.outgoAmount.value), isOutgoFixed: form.isOutgoFixed.checked, memo: form.memo.value } : w);
+                else if (type === 'income') App.state.incomes = App.state.incomes.map(i => i.id === id ? { ...i, name: form.name.value, amount: App.cleanInput(form.amount.value), isFixed: form.isFixed.checked, memo: form.memo.value } : i);
+                else if (type === 'payment') App.state.payments = App.state.payments.map(p => p.id === id ? { ...p, name: form.name.value, amount: App.cleanInput(form.amount.value), dueDate: form.dueDate.value ? Number(form.dueDate.value) : null, accountId: form.accountId.value ? Number(form.accountId.value) : '', category: form.category.value, memo: form.memo.value } : p);
+                else if (type === 'subItem') App.state.payments = App.state.payments.map(p => { if (p.id === paymentId) { return { ...p, subItems: p.subItems.map(s => s.id === id ? { ...s, name: form.name.value, amount: App.cleanInput(form.amount.value), category: form.category.value, endDate: form.endDate ? form.endDate.value : '', memo: form.memo.value } : s) }; } return p; });
+                App.state.editMode = null; App.saveData(); App.render();
             },
 
-            // --- リセット処理 ---
             executeMonthlyReset: function() {
                 App.state.accounts.forEach(a => { a.incomingAmount = ''; a.isIncomingDone = false; });
                 App.state.wallets.forEach(w => { w.outgoAmount = w.isOutgoFixed ? w.outgoAmount : ''; w.isOutgoDone = false; });
                 App.state.incomes.forEach(i => { i.amount = i.isFixed ? i.amount : ''; i.isDone = false; });
-                App.state.payments.forEach(p => {
-                    p.amount = p.category === 'variable' ? '' : p.amount;
-                    p.isDone = false;
-                    if (p.subItems) p.subItems.forEach(s => { s.amount = s.category === 'variable' ? '' : s.amount; });
-                });
+                App.state.payments.forEach(p => { p.amount = p.category === 'variable' ? '' : p.amount; p.isDone = false; if (p.subItems) p.subItems.forEach(s => { s.amount = s.category === 'variable' ? '' : s.amount; }); });
             },
             handleManualResetClick: function() {
                 if (window.confirm('すべての「済」を解除し、変動費の金額をリセットします。')) {
-                    App.executeMonthlyReset();
-                    App.saveData(); App.render();
-                    alert('リセットしました。');
+                    App.executeMonthlyReset(); App.saveData(); App.render(); alert('リセットしました。');
                 }
             },
 
-            // --- グラフ保存 ---
             triggerSaveHistory: function() {
-                const monthStr = document.getElementById('manualHistoryMonth').value;
-                if (!monthStr) return;
+                const monthStr = document.getElementById('manualHistoryMonth').value; if (!monthStr) return;
                 const [year, month] = monthStr.split('-');
-                App.state.preSaveModal = {
-                    id: monthStr, label: `${year.slice(2)}年${parseInt(month, 10)}月`,
-                    payment: App.totals.totalPaymentsNum, balance: App.totals.calculatedEndBalance
-                };
+                App.state.preSaveModal = { id: monthStr, label: `${year.slice(2)}年${parseInt(month, 10)}月`, payment: App.totals.totalPaymentsNum, balance: App.totals.calculatedEndBalance };
                 App.render();
             },
             confirmSaveHistory: function() {
-                const p = App.state.preSaveModal;
-                if (!p) return;
+                const p = App.state.preSaveModal; if (!p) return;
                 const payment = Number(document.getElementById('pre-save-payment').value) || 0;
                 const balance = Number(document.getElementById('pre-save-balance').value) || 0;
-                
                 const filtered = App.state.history.filter(h => h.id !== p.id);
                 App.state.history = [...filtered, { id: p.id, label: p.label, payment, balance }].sort((a, b) => a.id.localeCompare(b.id));
-                App.state.preSaveModal = null;
-                App.saveData(); App.render();
+                App.state.preSaveModal = null; App.saveData(); App.render();
             },
             startHistoryEdit: function(id) { App.state.historyEditMode = id; App.render(); },
             cancelHistoryEdit: function() { App.state.historyEditMode = null; App.render(); },
@@ -486,11 +340,9 @@
                 const payment = Number(document.getElementById(`edit-hist-${id}-payment`).value) || 0;
                 const balance = Number(document.getElementById(`edit-hist-${id}-balance`).value) || 0;
                 App.state.history = App.state.history.map(h => h.id === id ? { ...h, payment, balance } : h);
-                App.state.historyEditMode = null;
-                App.saveData(); App.render();
+                App.state.historyEditMode = null; App.saveData(); App.render();
             },
 
-            // --- バックアップ ---
             safeMemo: function(memo) { return String(memo || '').replace(/,/g, '，').replace(/\n/g, ' '); },
             generateExportText: function() {
                 let txt = "---支払い管理バックアップ---\n\n【手元現金】\n";
@@ -529,37 +381,61 @@
                 reader.onload = (ev) => { App.state.importData = ev.target.result; App.state.importMsg = { text: 'ファイルを読み込みました。「復元を実行」を押してください。', isError: false }; App.render(); };
                 reader.readAsText(file); input.value = null;
             },
+            
+            // --- ★強力な復元パーサー（過去の全フォーマットに対応） ---
             handleImportClick: function() {
-                const text = document.getElementById('import-data-text').value;
-                if (!text.trim()) return;
+                const text = App.state.importData;
+                if (!text || !text.trim()) { App.state.importMsg = { text: 'データを入力するかファイルを選択してください。', isError: true }; App.render(); return; }
                 try {
                     const lines = text.replace(/，/g, ',').replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)).split('\n');
                     let mode = ''; const nA = [], nW = [], nI = [], nP = [], nH = []; let currP = null;
                     for(let i=0; i<lines.length; i++) {
                         let line = lines[i].trim(); if (!line || line.startsWith('---')) continue; if (line.startsWith('【')) { mode = line; continue; }
                         const pts = line.split(',');
-                        if (mode === '【口座】' && pts.length >= 3) nA.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], incomingAmount: pts[3] || '', isIncomingDone: pts[4] === '1', memo: pts.slice(5).join(',') });
-                        else if (mode === '【手元現金】' && pts.length >= 3) nW.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], outgoAmount: pts[3] || '', isOutgoDone: pts[4] === '1', isOutgoFixed: pts[5] === '1', memo: pts.slice(6).join(',') });
-                        else if (mode === '【入金】' && pts.length >= 3) nI.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], isFixed: pts[3] === '1', isDone: pts[4] === '1', memo: pts.slice(5).join(',') });
+                        if (mode === '【口座】' && pts.length >= 3) {
+                            let incAmt = ''; let isIncDone = false; let memo = '';
+                            if (pts.length === 4) { memo = pts[3]; }
+                            else if (pts.length === 5) { incAmt = pts[3]; memo = pts[4]; }
+                            else if (pts.length >= 6) { incAmt = pts[3]; isIncDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
+                            nA.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], incomingAmount: incAmt, isIncomingDone: isIncDone, memo: memo });
+                        }
+                        else if (mode === '【手元現金】' && pts.length >= 3) {
+                            nW.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], outgoAmount: pts[3] || '', isOutgoDone: pts[4] === '1', isOutgoFixed: pts[5] === '1', memo: pts.slice(6).join(',') });
+                        }
+                        else if (mode === '【入金】' && pts.length >= 3) {
+                            let isFixed = false; let isDone = false; let memo = '';
+                            if (pts.length === 4) { memo = pts[3]; }
+                            else if (pts.length === 5) { isFixed = pts[3] === '1'; memo = pts[4]; }
+                            else if (pts.length >= 6) { isFixed = pts[3] === '1'; isDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
+                            nI.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], isFixed: isFixed, isDone: isDone, memo: memo });
+                        }
                         else if (mode === '【支払い】') {
-                            if (line.startsWith('>') && currP && pts.length >= 5) {
-                                const cat = (pts[3] === '1' || pts[3] === '0') ? (pts[3]==='1'?'fixed':'variable') : pts[3];
-                                currP.subItems.push({ id: Number(pts[0].substring(1)), name: pts[1], amount: pts[2], category: cat, endDate: pts[4] || '', memo: pts.slice(5).join(',') });
+                            if (line.startsWith('>') && currP && pts.length >= 4) {
+                                let cat = 'variable'; let endDate = ''; let memo = '';
+                                if (pts.length === 6) { cat = (pts[3] === '1' || pts[3] === '0') ? (pts[3]==='1'?'fixed':'variable') : pts[3]; endDate = pts[4]; memo = pts[5]; } 
+                                else if (pts.length >= 7) { cat = (pts[3] === '1' || pts[3] === '0') ? (pts[3]==='1'?'fixed':'variable') : pts[3]; endDate = pts[4]; memo = pts.slice(5).join(','); }
+                                currP.subItems.push({ id: Number(pts[0].substring(1)), name: pts[1], amount: pts[2], category: cat, endDate: endDate, memo: memo });
                             }
                             else if (pts.length >= 3) {
-                                const cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5];
-                                currP = { id: Number(pts[0]), name: pts[1], amount: pts[2], dueDate: pts[3] ? Number(pts[3]) : null, accountId: pts[4] ? Number(pts[4]) : '', category: cat, isDone: pts[6] === '1', memo: pts.slice(7).join(','), subItems: [] }; 
-                                nP.push(currP); 
+                                let dueDate = pts[3] ? Number(pts[3]) : null; let accountId = pts[4] ? Number(pts[4]) : '';
+                                let cat = 'variable'; let isDone = false; let memo = '';
+                                if (pts.length === 6) { memo = pts[5]; }
+                                else if (pts.length === 7) { cat = pts[5] === '1' ? 'fixed' : 'variable'; memo = pts[6]; }
+                                else if (pts.length >= 8) { cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5]; isDone = pts[6] === '1'; memo = pts.slice(7).join(','); }
+                                currP = { id: Number(pts[0]), name: pts[1], amount: pts[2], dueDate: dueDate, accountId: accountId, category: cat, isDone: isDone, memo: memo, subItems: [] };
+                                nP.push(currP);
                             }
-                        } else if (mode === '【履歴】' && pts.length >= 4) nH.push({ id: pts[0], label: pts[1], payment: Number(pts[2]), balance: Number(pts[3]) });
+                        } else if (mode === '【履歴】' && pts.length >= 4) {
+                            nH.push({ id: pts[0], label: pts[1], payment: Number(pts[2]), balance: Number(pts[3]) });
+                        }
                     }
                     App.state.confirmImportData = { accounts: nA, wallets: nW, incomes: nI, payments: nP, history: nH };
+                    App.state.importMsg = { text: '', isError: false };
                     App.render();
-                } catch (e) { App.state.importMsg = { text: 'データの解析に失敗しました。', isError: true }; App.render(); }
+                } catch (e) { App.state.importMsg = { text: 'データの解析に失敗しました。ファイルが正しくない可能性があります。', isError: true }; App.render(); }
             },
             executeImport: function() {
-                const data = App.state.confirmImportData;
-                if (!data) return;
+                const data = App.state.confirmImportData; if (!data) return;
                 App.state.accounts = data.accounts; App.state.wallets = data.wallets; App.state.incomes = data.incomes; App.state.payments = data.payments; App.state.history = data.history;
                 App.state.importData = ''; App.state.confirmImportData = null; App.state.showSuccessModal = true;
                 App.saveData(); App.render();
@@ -575,26 +451,13 @@
                 `;
             },
             renderCategorySelect: function(name, val) {
-                return `
-                    <select name="${name}" class="w-24 px-1 py-1 text-xs border rounded">
-                        ${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}
-                    </select>
-                `;
+                return `<select name="${name}" class="w-24 px-1 py-1 text-xs border rounded">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`;
             },
             renderCategorySelectLg: function(name, val) {
-                return `
-                    <select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">
-                        ${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}
-                    </select>
-                `;
+                return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`;
             },
             renderAccountSelect: function(name, val) {
-                return `
-                    <select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white">
-                        <option value="">口座未定</option>
-                        ${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}
-                    </select>
-                `;
+                return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}</select>`;
             },
 
             // --- メイン描画 ---
@@ -621,7 +484,7 @@
                 if (App.state.activeTab === 'history') html += App.renderHistory();
                 if (App.state.activeTab === 'settings') html += App.renderSettings();
 
-                html += `</div>`; // max-w-6xl end
+                html += `</div>`;
                 html += App.renderModals();
 
                 appDiv.innerHTML = html;
@@ -664,7 +527,7 @@
                             <form onsubmit="App.saveEdit(event, 'account', ${item.id})" class="bg-white rounded-lg p-3 shadow-inner border border-blue-200">
                                 <div class="flex gap-2 mb-2"><input name="name" type="text" value="${escapeHTML(item.name)}" class="flex-1 px-2 py-1 text-sm border rounded" placeholder="口座名" required/><input name="amount" type="text" value="${escapeHTML(item.amount)}" class="w-24 px-2 py-1 text-sm border rounded" placeholder="現在残高"/></div>
                                 <div class="flex gap-2 mb-2"><input name="incomingAmount" type="text" value="${escapeHTML(item.incomingAmount)}" class="w-28 px-2 py-1 text-sm border rounded bg-emerald-50" placeholder="入金予定"/><input name="memo" type="text" value="${escapeHTML(item.memo)}" class="flex-1 px-2 py-1 text-sm border rounded" placeholder="メモ"/></div>
-                                <div class="flex justify-end gap-2"><button type="button" onclick="App.cancelEdit()" class="px-3 py-1 text-xs border rounded bg-gray-50">ｷｬﾝｾﾙ</button><button type="submit" class="px-3 py-1 text-xs text-white bg-blue-600 rounded font-bold">保存</button></div>
+                                <div class="flex justify-end gap-2"><button type="button" onclick="App.cancelEdit()" class="px-3 py-1 text-xs border rounded bg-gray-50 font-bold text-gray-600">ｷｬﾝｾﾙ</button><button type="submit" class="px-3 py-1 text-xs text-white bg-blue-600 rounded font-bold">保存</button></div>
                             </form>
                         `;
                     } else {
@@ -733,7 +596,7 @@
                             <form onsubmit="App.saveEdit(event, 'wallet', ${item.id})" class="bg-white rounded-lg p-3 shadow-inner border border-amber-200">
                                 <div class="flex gap-2 mb-2"><input name="name" type="text" value="${escapeHTML(item.name)}" class="flex-1 px-2 py-1 text-sm border rounded" placeholder="名称" required/><input name="amount" type="text" value="${escapeHTML(item.amount)}" class="w-24 px-2 py-1 text-sm border rounded" placeholder="残高 (数式OK)"/></div>
                                 <div class="flex gap-2 mb-2"><input name="outgoAmount" type="text" value="${escapeHTML(item.outgoAmount)}" class="w-24 px-2 py-1 text-sm border rounded bg-rose-50" placeholder="消費予定"/><input name="memo" type="text" value="${escapeHTML(item.memo)}" class="flex-1 px-2 py-1 text-sm border rounded" placeholder="メモ"/></div>
-                                <div class="flex justify-between items-center"><label class="text-[10px] font-bold text-amber-800 flex items-center gap-1"><input name="isOutgoFixed" type="checkbox" ${item.isOutgoFixed ? 'checked' : ''} class="rounded"/>毎月固定</label><div class="flex gap-2"><button type="button" onclick="App.cancelEdit()" class="px-3 py-1 text-xs border rounded bg-gray-50">ｷｬﾝｾﾙ</button><button type="submit" class="px-3 py-1 text-xs text-white bg-amber-600 rounded font-bold">保存</button></div></div>
+                                <div class="flex justify-between items-center"><label class="text-[10px] font-bold text-amber-800 flex items-center gap-1"><input name="isOutgoFixed" type="checkbox" ${item.isOutgoFixed ? 'checked' : ''} class="rounded"/>毎月固定</label><div class="flex gap-2"><button type="button" onclick="App.cancelEdit()" class="px-3 py-1 text-xs border rounded bg-gray-50 font-bold text-gray-600">ｷｬﾝｾﾙ</button><button type="submit" class="px-3 py-1 text-xs text-white bg-amber-600 rounded font-bold">保存</button></div></div>
                             </form>
                         `;
                     } else {
@@ -831,7 +694,7 @@
                 html += `
                         </div>
                         <form onsubmit="App.addIncome(event, this)" class="bg-white p-4 rounded-xl border shadow-sm space-y-3">
-                            <div class="flex gap-2"><input name="incName" type="text" placeholder="入金項目名" required class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300"/><input name="incAmount" type="text" placeholder="金額 (数式OK)" class="w-28 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300"/></div>
+                            <div class="flex gap-2"><input name="incName" type="text" placeholder="入金項目名" required class="flex-1 px-3 py-2 text-sm border-lg focus:ring-2 focus:ring-emerald-300"/><input name="incAmount" type="text" placeholder="金額 (数式OK)" class="w-28 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300"/></div>
                             <div class="flex gap-2"><input name="incMemo" type="text" placeholder="メモ" class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300"/><button type="submit" class="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">追加</button></div>
                             <label class="flex items-center gap-2 text-xs font-bold text-gray-600"><input name="incIsFixed" type="checkbox" class="rounded text-emerald-600 w-4 h-4"/>毎月固定の予定にする</label>
                         </form>
@@ -866,8 +729,7 @@
                 `;
 
                 s.payments.forEach((item, index) => {
-                    const isEditing = s.editMode && s.editMode.type === 'payment' && s.editMode.id === item.id;
-                    if (isEditing) {
+                    if (s.editMode && s.editMode.type === 'payment' && s.editMode.id === item.id) {
                         html += `
                             <form onsubmit="App.saveEdit(event, 'payment', ${item.id})" class="bg-rose-50/80 rounded-xl shadow-inner border border-rose-200 p-4 space-y-3">
                                 <div class="flex gap-2"><input name="name" type="text" value="${escapeHTML(item.name)}" class="flex-1 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-rose-300" placeholder="項目名" required/><input name="amount" type="text" value="${escapeHTML(item.amount)}" class="w-28 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-rose-300" placeholder="請求総額"/></div>
@@ -989,11 +851,6 @@
                 return html;
             },
 
-            executeDeleteSubItem: function(paymentId, subItemId) {
-                App.state.payments = App.state.payments.map(p => p.id === paymentId ? { ...p, subItems: (p.subItems || []).filter(s => s.id !== subItemId) } : p);
-                App.saveData(); App.render();
-            },
-
             renderCashflow: function() {
                 const isShort = App.totals.activeFinalBalance < 0;
                 return `
@@ -1108,7 +965,7 @@
                     <div class="bg-white rounded-2xl p-6 shadow-md border border-gray-100 animate-zoom-in space-y-8">
                         <div>
                             <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 pb-3 border-b border-gray-100">${App.getIconHTML('refresh', 24, 'text-red-500')} 手動月替わりリセット</h2>
-                            <p class="text-sm text-gray-600 mb-4">今すぐ「済」マークの全解除と、変動費の数値を一括で空欄にしたい場合は以下のボタンを押してください。</p>
+                            <p class="text-sm text-gray-600 mb-4">今すぐ「済」マークの全解除と、固定費以外の数値を一括で空欄にしたい場合は以下のボタンを押してください。</p>
                             <button onclick="App.handleManualResetClick()" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-5 rounded-lg text-sm transition-colors flex items-center gap-1 shadow-sm">${App.getIconHTML('refresh', 18)} 今すぐ一括リセットを実行</button>
                         </div>
                         <div>
@@ -1141,7 +998,7 @@
                                         </label>
                                     </div>
                                     <div class="flex items-center gap-4 mb-4"><div class="flex-1 h-px bg-emerald-200"></div><span class="text-xs text-emerald-600 font-bold">または</span><div class="flex-1 h-px bg-emerald-200"></div></div>
-                                    <textarea id="import-data-text" placeholder="ここにバックアップテキストを貼り付け" class="w-full h-24 p-3 text-xs font-mono bg-white border border-emerald-200 rounded-lg outline-none resize-y shadow-inner mb-4"></textarea>
+                                    <textarea id="import-data-text" oninput="App.state.importData=this.value" placeholder="ここにバックアップテキストを貼り付け" class="w-full h-24 p-3 text-xs font-mono bg-white border border-emerald-200 rounded-lg outline-none resize-y shadow-inner mb-4">${escapeHTML(App.state.importData)}</textarea>
                                     <div class="flex flex-col gap-3 mt-auto">
                                         ${App.state.importMsg.text ? `
                                             <div class="p-3 rounded-lg text-sm font-bold flex items-start gap-2 animate-fade-in ${App.state.importMsg.isError ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'}">
