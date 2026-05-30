@@ -11,7 +11,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>毎月の支払い管理</title>
     
-    <!-- Reactは不使用、Tailwindとアイコンのみ -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
 
@@ -146,7 +145,7 @@
                             const parsed = JSON.parse(data);
                             if (Array.isArray(parsed)) return parsed;
                         }
-                    } catch(e) { console.error("データ読込エラー:", e); }
+                    } catch(e) {}
                 }
                 return [];
             },
@@ -185,7 +184,7 @@
                 let activePayments = 0, totalPaymentsNum = 0;
                 
                 const catTotals = { loan: 0, fixed: 0, variable: 0, investment: 0 };
-                const allCatTotals = { loan: 0, fixed: 0, variable: 0, investment: 0 }; // 自動保存や手動保存時に渡す全額のカテゴリ
+                const allCatTotals = { loan: 0, fixed: 0, variable: 0, investment: 0 };
 
                 s.accounts.forEach(a => {
                     totalAccountsNum += App.calcAmount(a.amount);
@@ -296,12 +295,7 @@
                 else { App.state[t.type + 's'] = App.state[t.type + 's'].filter(item => item.id !== t.id); }
                 App.state.deleteTarget = null; App.saveData(); App.render();
             },
-            closeModal: function(modalName) {
-                App.state[modalName] = null;
-                if (modalName === 'showAutoSaveModal') App.state.showAutoSaveModal = false;
-                if (modalName === 'showSuccessModal') App.state.showSuccessModal = false;
-                App.render();
-            },
+            closeModal: function(modalName) { App.state[modalName] = null; if (modalName === 'showAutoSaveModal') App.state.showAutoSaveModal = false; if (modalName === 'showSuccessModal') App.state.showSuccessModal = false; App.render(); },
             openAccountPopup: function(id) { App.state.selectedAccountPopup = id; App.render(); },
 
             startEdit: function(type, id, e) { if (e) e.stopPropagation(); App.state.editMode = { type, id }; App.render(); },
@@ -328,7 +322,7 @@
                 }
             },
 
-            // --- ★ グラフ保存：色分けデータ(catTotals)を含める ---
+            // --- グラフ保存と色分け内訳対応 ---
             triggerSaveHistory: function() {
                 const monthStr = document.getElementById('manualHistoryMonth').value;
                 if (!monthStr) return;
@@ -341,26 +335,22 @@
                 App.render();
             },
             confirmSaveHistory: function() {
-                const p = App.state.preSaveModal;
-                if (!p) return;
+                const p = App.state.preSaveModal; if (!p) return;
                 const payment = Number(document.getElementById('pre-save-payment').value) || 0;
                 const balance = Number(document.getElementById('pre-save-balance').value) || 0;
-                
                 const filtered = App.state.history.filter(h => h.id !== p.id);
                 // 内訳も一緒に保存する
                 App.state.history = [...filtered, { id: p.id, label: p.label, payment, balance, catTotals: p.catTotals }].sort((a, b) => a.id.localeCompare(b.id));
-                App.state.preSaveModal = null;
-                App.saveData(); App.render();
+                App.state.preSaveModal = null; App.saveData(); App.render();
             },
             startHistoryEdit: function(id) { App.state.historyEditMode = id; App.render(); },
             cancelHistoryEdit: function() { App.state.historyEditMode = null; App.render(); },
             saveHistoryEdit: function(id) {
                 const payment = Number(document.getElementById(`edit-hist-${id}-payment`).value) || 0;
                 const balance = Number(document.getElementById(`edit-hist-${id}-balance`).value) || 0;
-                // ペンボタンで手動修正した場合は内訳と整合性が合わなくなるためカテゴリ情報を消す
+                // 手動修正時は内訳と整合性が合わなくなるためカテゴリ情報を消す
                 App.state.history = App.state.history.map(h => h.id === id ? { ...h, payment, balance, catTotals: null } : h);
-                App.state.historyEditMode = null;
-                App.saveData(); App.render();
+                App.state.historyEditMode = null; App.saveData(); App.render();
             },
 
             // --- バックアップ ---
@@ -379,7 +369,6 @@
                 });
                 txt += "\n【履歴】\n";
                 App.state.history.forEach(h => {
-                    // 内訳データもエクスポートに含める
                     txt += `${h.id},${h.label},${h.payment},${h.balance},${h.catTotals?.loan||0},${h.catTotals?.fixed||0},${h.catTotals?.variable||0},${h.catTotals?.investment||0}\n`;
                 });
                 return txt;
@@ -568,7 +557,7 @@
                             <form onsubmit="App.saveEdit(event, 'account', ${item.id})" class="bg-white rounded-lg p-3 shadow-inner border border-blue-200">
                                 <div class="flex gap-2 mb-2"><input name="name" type="text" value="${escapeHTML(item.name)}" class="flex-1 px-2 py-1 text-sm border rounded" placeholder="口座名" required/><input name="amount" type="text" value="${escapeHTML(item.amount)}" class="w-24 px-2 py-1 text-sm border rounded" placeholder="現在残高"/></div>
                                 <div class="flex gap-2 mb-2"><input name="incomingAmount" type="text" value="${escapeHTML(item.incomingAmount)}" class="w-28 px-2 py-1 text-sm border rounded bg-emerald-50" placeholder="入金予定"/><input name="memo" type="text" value="${escapeHTML(item.memo)}" class="flex-1 px-2 py-1 text-sm border rounded" placeholder="メモ"/></div>
-                                <div class="flex justify-end gap-2"><button type="button" onclick="App.cancelEdit()" class="px-3 py-1 text-xs border rounded bg-gray-50">ｷｬﾝｾﾙ</button><button type="submit" class="px-3 py-1 text-xs text-white bg-blue-600 rounded font-bold">保存</button></div>
+                                <div class="flex justify-end gap-2"><button type="button" onclick="App.cancelEdit()" class="px-3 py-1 text-xs border rounded bg-gray-50 font-bold text-gray-600">ｷｬﾝｾﾙ</button><button type="submit" class="px-3 py-1 text-xs text-white bg-blue-600 rounded font-bold">保存</button></div>
                             </form>
                         `;
                     } else {
@@ -637,7 +626,7 @@
                             <form onsubmit="App.saveEdit(event, 'wallet', ${item.id})" class="bg-white rounded-lg p-3 shadow-inner border border-amber-200">
                                 <div class="flex gap-2 mb-2"><input name="name" type="text" value="${escapeHTML(item.name)}" class="flex-1 px-2 py-1 text-sm border rounded" placeholder="名称" required/><input name="amount" type="text" value="${escapeHTML(item.amount)}" class="w-24 px-2 py-1 text-sm border rounded" placeholder="残高 (数式OK)"/></div>
                                 <div class="flex gap-2 mb-2"><input name="outgoAmount" type="text" value="${escapeHTML(item.outgoAmount)}" class="w-24 px-2 py-1 text-sm border rounded bg-rose-50" placeholder="消費予定"/><input name="memo" type="text" value="${escapeHTML(item.memo)}" class="flex-1 px-2 py-1 text-sm border rounded" placeholder="メモ"/></div>
-                                <div class="flex justify-between items-center"><label class="text-[10px] font-bold text-amber-800 flex items-center gap-1"><input name="isOutgoFixed" type="checkbox" ${item.isOutgoFixed ? 'checked' : ''} class="rounded"/>毎月固定</label><div class="flex gap-2"><button type="button" onclick="App.cancelEdit()" class="px-3 py-1 text-xs border rounded bg-gray-50">ｷｬﾝｾﾙ</button><button type="submit" class="px-3 py-1 text-xs text-white bg-amber-600 rounded font-bold">保存</button></div></div>
+                                <div class="flex justify-between items-center"><label class="text-[10px] font-bold text-amber-800 flex items-center gap-1"><input name="isOutgoFixed" type="checkbox" ${item.isOutgoFixed ? 'checked' : ''} class="rounded"/>毎月固定</label><div class="flex gap-2"><button type="button" onclick="App.cancelEdit()" class="px-3 py-1 text-xs border rounded bg-gray-50 font-bold text-gray-600">ｷｬﾝｾﾙ</button><button type="submit" class="px-3 py-1 text-xs text-white bg-amber-600 rounded font-bold">保存</button></div></div>
                             </form>
                         `;
                     } else {
@@ -918,32 +907,54 @@
                 `;
             },
 
+            // --- ★ グラフに目盛りを追加・残高のマーカーを見やすく変更 ---
             renderHistory: function() {
                 let html = `
                     <div class="space-y-6 animate-fade-in">
                         <div class="bg-white rounded-2xl p-6 shadow-md border border-gray-100">
                             <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 pb-4 border-b border-gray-100">
-                                <div><h2 class="text-xl font-bold text-gray-800">月次推移グラフ</h2><p class="text-sm text-gray-500">毎月の支払い実績額と、月末最終残高の履歴グラフです。棒をタップすると内訳が表示されます。</p></div>
+                                <div><h2 class="text-xl font-bold text-gray-800">月次推移グラフ</h2><p class="text-sm text-gray-500">毎月の支払い実績と、月末残高（緑の横線）の推移です。棒をタップすると内訳が表示されます。</p></div>
                                 <div class="flex flex-wrap items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100 w-full lg:w-auto">
                                     <div class="text-xs font-bold text-indigo-900 block w-full mb-1">💡 現在の状況を過去の月末残高として保存する</div>
                                     <input type="month" id="manualHistoryMonth" value="${App.state.manualHistoryMonth}" onchange="App.state.manualHistoryMonth = this.value" class="text-sm px-2 py-1.5 border rounded bg-white" />
                                     <button onclick="App.triggerSaveHistory()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 flex items-center gap-1">${App.getIconHTML('save', 16)} 保存</button>
                                 </div>
                             </div>
-                            <div class="h-64 mt-8 flex items-end justify-around gap-2 border-b-2 border-gray-200 pb-2 relative overflow-x-auto hide-scrollbar">
                 `;
                 
                 if (App.state.history.length === 0) {
-                    html += `<p class="text-gray-400 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">履歴データがまだありません</p>`;
+                    html += `<div class="h-64 mt-8 flex items-center justify-center border-b-2 border-gray-200 pb-2 relative"><p class="text-gray-400">履歴データがまだありません</p></div>`;
                 } else {
-                    const maxPayment = Math.max(...App.state.history.map(h => Number(h.payment) || 0), 1);
+                    const maxVal = Math.max(...App.state.history.map(h => Math.max(Number(h.payment) || 0, Number(h.balance) || 0)), 1);
+                    const yAxisValues = [1, 0.75, 0.5, 0.25, 0].map(ratio => Math.floor(maxVal * ratio));
+                    
+                    html += `<div class="relative h-[300px] mt-6 flex">`;
+                    
+                    // Y軸目盛り（左側）
+                    html += `
+                        <div class="w-14 shrink-0 flex flex-col justify-between items-end pr-2 pb-8 text-[10px] text-gray-400 font-mono z-10 bg-white border-r border-gray-100">
+                            ${yAxisValues.map(val => `<span>${val === 0 ? '0' : App.formatCurrency(val).replace('￥', '¥').replace('.00', '')}</span>`).join('')}
+                        </div>
+                    `;
+
+                    // グラフエリア（横スクロール）
+                    html += `
+                        <div class="flex-1 overflow-x-auto hide-scrollbar relative border-b-2 border-gray-200 pb-8">
+                            <!-- 背景の点線ガイド -->
+                            <div class="absolute inset-0 flex flex-col justify-between pointer-events-none z-0 pb-8">
+                                ${[1, 2, 3, 4, 5].map(() => `<div class="w-full border-t border-gray-200 border-dashed"></div>`).join('')}
+                            </div>
+                            
+                            <div class="flex items-end justify-around gap-6 h-full px-4 min-w-max relative z-10">
+                    `;
+                    
                     App.state.history.forEach(data => {
                         const paymentValue = Number(data.payment) || 0;
                         const balanceValue = Number(data.balance) || 0;
-                        const paymentHeight = (paymentValue / maxPayment) * 100;
+                        const paymentHeight = (paymentValue / maxVal) * 100;
                         const isShort = balanceValue < 0;
                         
-                        // ★ カテゴリ別積み上げグラフの描画ロジック
+                        // カテゴリ別積み上げ棒グラフ
                         let barsHTML = '';
                         if (data.catTotals && paymentValue > 0) {
                             const c = data.catTotals;
@@ -966,7 +977,7 @@
                             barsHTML = `<div class="w-full h-full bg-rose-400 rounded-t-sm"></div>`;
                         }
 
-                        // ★ ツールチップの詳細内訳表示
+                        // ツールチップ
                         let tooltipHTML = `<p>発生総支払: ${App.formatCurrency(paymentValue)}</p>`;
                         if (data.catTotals) {
                             tooltipHTML += `<div class="text-[10px] text-gray-300 mt-1 border-t border-gray-600 pt-1">`;
@@ -976,35 +987,40 @@
                             if (data.catTotals.investment) tooltipHTML += `<p>投資: ${App.formatCurrency(data.catTotals.investment)}</p>`;
                             tooltipHTML += `</div>`;
                         }
-                        tooltipHTML += `<p class="mt-1 font-bold">月末残高: ${App.formatCurrency(balanceValue)}</p>`;
+                        tooltipHTML += `<p class="mt-1 font-bold text-emerald-300">月末残高: ${App.formatCurrency(balanceValue)}</p>`;
 
                         html += `
-                            <div class="flex flex-col items-center flex-1 group min-w-[65px]">
-                                <div class="opacity-0 group-hover:opacity-100 transition-opacity absolute top-0 bg-gray-800 text-white text-xs p-2 rounded pointer-events-none z-20 whitespace-nowrap">
-                                    ${tooltipHTML}
-                                </div>
-                                <div class="w-full flex justify-center items-end gap-1 h-48 relative">
-                                    <div class="w-1/2 max-w-[40px] flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${paymentHeight}%;">
-                                        ${barsHTML}
+                                <div class="flex flex-col items-center group w-10 shrink-0 h-full relative">
+                                    <div class="opacity-0 group-hover:opacity-100 transition-opacity absolute top-0 bg-gray-800 text-white text-xs p-2 rounded pointer-events-none z-20 whitespace-nowrap -translate-y-full mt-[-8px]">
+                                        ${tooltipHTML}
                                     </div>
-                                    <div class="absolute w-3 h-3 rounded-full border-2 border-white -right-1 z-10 ${isShort ? 'bg-red-500' : 'bg-emerald-500'}" style="bottom: ${Math.max(Math.min((balanceValue / maxPayment) * 100, 100), -20)}%;"></div>
+                                    <div class="w-full h-full flex justify-center items-end relative">
+                                        <div class="w-full max-w-[32px] flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden z-10" style="height: ${paymentHeight}%;">
+                                            ${barsHTML}
+                                        </div>
+                                        <!-- 月末残高の横線マーカー -->
+                                        <div class="absolute w-[140%] h-1.5 z-20 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -2)}%; box-shadow: 0 1px 2px rgba(0,0,0,0.3);"></div>
+                                    </div>
+                                    <span class="text-xs text-gray-500 mt-2 font-bold whitespace-nowrap absolute -bottom-6">${escapeHTML(data.label)}</span>
                                 </div>
-                                <span class="text-xs text-gray-500 mt-3 font-bold whitespace-nowrap">${escapeHTML(data.label)}</span>
-                            </div>
                         `;
                     });
+                    
+                    html += `
+                            </div>
+                        </div>
+                    </div>
+                    `;
                 }
                 
-                // 凡例
                 html += `
-                            </div>
                             <div class="flex justify-center gap-4 mt-6 text-[10px] sm:text-xs text-gray-600 flex-wrap">
                                 <span class="flex items-center gap-1"><div class="w-3 h-3 bg-purple-400 rounded-sm"></div>ローン</span>
                                 <span class="flex items-center gap-1"><div class="w-3 h-3 bg-indigo-400 rounded-sm"></div>固定費</span>
                                 <span class="flex items-center gap-1"><div class="w-3 h-3 bg-rose-400 rounded-sm"></div>変動費(旧仕様分含)</span>
                                 <span class="flex items-center gap-1"><div class="w-3 h-3 bg-emerald-400 rounded-sm"></div>投資</span>
-                                <span class="flex items-center gap-1 ml-4"><div class="w-3 h-3 bg-emerald-500 rounded-full"></div>月末残高（黒字）</span>
-                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-red-500 rounded-full"></div>月末残高（赤字）</span>
+                                <span class="flex items-center gap-1 ml-4"><div class="w-4 h-1.5 bg-emerald-500 rounded-full"></div>月末残高（黒字）</span>
+                                <span class="flex items-center gap-1"><div class="w-4 h-1.5 bg-red-500 rounded-full"></div>月末残高（赤字）</span>
                             </div>
                         </div>
                         
