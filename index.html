@@ -37,15 +37,14 @@
           font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
           user-select: none;
         }
+        /* ツールチップ用のタップ反応を良くする設定 */
+        .group:focus .group-focus\:opacity-100 { opacity: 1; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans pb-24">
     <div id="app"></div>
 
     <script>
-        // ----------------------------------------------------
-        // アプリケーションの全ロジック（純粋なJavaScript）
-        // ----------------------------------------------------
         const STORAGE_KEY = 'mpm_vanilla_v4_';
 
         const escapeHTML = (str) => {
@@ -136,6 +135,23 @@
             getCurrentMonthStr: function() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; },
             getPreviousMonthStr: function() { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; },
             cleanInput: function(val) { return String(val || '').replace(/,/g, ''); },
+
+            // ★ グラフの目盛りを「綺麗な数字」にするアルゴリズム
+            getNiceMax: function(val) {
+                if (val <= 0) return 40000;
+                const pow = Math.pow(10, Math.floor(Math.log10(val)));
+                const frac = val / pow;
+                let niceFrac;
+                if (frac <= 1) niceFrac = 1;       // 例: 100,000
+                else if (frac <= 1.2) niceFrac = 1.2; // 例: 120,000
+                else if (frac <= 1.6) niceFrac = 1.6; // 例: 160,000
+                else if (frac <= 2) niceFrac = 2;     // 例: 200,000
+                else if (frac <= 4) niceFrac = 4;     // 例: 400,000
+                else if (frac <= 6) niceFrac = 6;     // 例: 600,000
+                else if (frac <= 8) niceFrac = 8;     // 例: 800,000
+                else niceFrac = 10;                   // 例: 1,000,000
+                return niceFrac * pow;
+            },
 
             safeLoadArray: function(keys) {
                 for (let key of keys) {
@@ -322,7 +338,6 @@
                 }
             },
 
-            // --- グラフ保存と色分け内訳対応 ---
             triggerSaveHistory: function() {
                 const monthStr = document.getElementById('manualHistoryMonth').value;
                 if (!monthStr) return;
@@ -330,7 +345,7 @@
                 App.state.preSaveModal = {
                     id: monthStr, label: `${year.slice(2)}年${parseInt(month, 10)}月`,
                     payment: App.totals.totalPaymentsNum, balance: App.totals.calculatedEndBalance,
-                    catTotals: App.totals.allCatTotals // 内訳を保持
+                    catTotals: App.totals.allCatTotals
                 };
                 App.render();
             },
@@ -339,7 +354,6 @@
                 const payment = Number(document.getElementById('pre-save-payment').value) || 0;
                 const balance = Number(document.getElementById('pre-save-balance').value) || 0;
                 const filtered = App.state.history.filter(h => h.id !== p.id);
-                // 内訳も一緒に保存する
                 App.state.history = [...filtered, { id: p.id, label: p.label, payment, balance, catTotals: p.catTotals }].sort((a, b) => a.id.localeCompare(b.id));
                 App.state.preSaveModal = null; App.saveData(); App.render();
             },
@@ -348,12 +362,10 @@
             saveHistoryEdit: function(id) {
                 const payment = Number(document.getElementById(`edit-hist-${id}-payment`).value) || 0;
                 const balance = Number(document.getElementById(`edit-hist-${id}-balance`).value) || 0;
-                // 手動修正時は内訳と整合性が合わなくなるためカテゴリ情報を消す
                 App.state.history = App.state.history.map(h => h.id === id ? { ...h, payment, balance, catTotals: null } : h);
                 App.state.historyEditMode = null; App.saveData(); App.render();
             },
 
-            // --- バックアップ ---
             safeMemo: function(memo) { return String(memo || '').replace(/,/g, '，').replace(/\n/g, ' '); },
             generateExportText: function() {
                 let txt = "---支払い管理バックアップ---\n\n【手元現金】\n";
@@ -373,10 +385,7 @@
                 });
                 return txt;
             },
-            handleGenerateExport: function() {
-                try { App.state.exportData = App.generateExportText(); App.state.copySuccess = false; App.state.importMsg = { text: '', isError: false }; App.render(); }
-                catch (e) { App.state.importMsg = { text: '出力エラー', isError: true }; App.render(); }
-            },
+            handleGenerateExport: function() { try { App.state.exportData = App.generateExportText(); App.state.copySuccess = false; App.state.importMsg = { text: '', isError: false }; App.render(); } catch (e) { App.state.importMsg = { text: '出力エラー', isError: true }; App.render(); } },
             handleDownloadExport: function() {
                 try {
                     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([App.generateExportText()], { type: 'text/plain' }));
@@ -405,9 +414,7 @@
                         const pts = line.split(',');
                         if (mode === '【口座】' && pts.length >= 3) {
                             let incAmt = ''; let isIncDone = false; let memo = '';
-                            if (pts.length === 4) { memo = pts[3]; }
-                            else if (pts.length === 5) { incAmt = pts[3]; memo = pts[4]; }
-                            else if (pts.length >= 6) { incAmt = pts[3]; isIncDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
+                            if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { incAmt = pts[3]; memo = pts[4]; } else if (pts.length >= 6) { incAmt = pts[3]; isIncDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
                             nA.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], incomingAmount: incAmt, isIncomingDone: isIncDone, memo: memo });
                         }
                         else if (mode === '【手元現金】' && pts.length >= 3) {
@@ -415,9 +422,7 @@
                         }
                         else if (mode === '【入金】' && pts.length >= 3) {
                             let isFixed = false; let isDone = false; let memo = '';
-                            if (pts.length === 4) { memo = pts[3]; }
-                            else if (pts.length === 5) { isFixed = pts[3] === '1'; memo = pts[4]; }
-                            else if (pts.length >= 6) { isFixed = pts[3] === '1'; isDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
+                            if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { isFixed = pts[3] === '1'; memo = pts[4]; } else if (pts.length >= 6) { isFixed = pts[3] === '1'; isDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
                             nI.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], isFixed: isFixed, isDone: isDone, memo: memo });
                         }
                         else if (mode === '【支払い】') {
@@ -428,11 +433,8 @@
                                 currP.subItems.push({ id: Number(pts[0].substring(1)), name: pts[1], amount: pts[2], category: cat, endDate: endDate, memo: memo });
                             }
                             else if (pts.length >= 3) {
-                                let dueDate = pts[3] ? Number(pts[3]) : null; let accountId = pts[4] ? Number(pts[4]) : '';
-                                let cat = 'variable'; let isDone = false; let memo = '';
-                                if (pts.length === 6) { memo = pts[5]; }
-                                else if (pts.length === 7) { cat = pts[5] === '1' ? 'fixed' : 'variable'; memo = pts[6]; }
-                                else if (pts.length >= 8) { cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5]; isDone = pts[6] === '1'; memo = pts.slice(7).join(','); }
+                                let dueDate = pts[3] ? Number(pts[3]) : null; let accountId = pts[4] ? Number(pts[4]) : ''; let cat = 'variable'; let isDone = false; let memo = '';
+                                if (pts.length === 6) { memo = pts[5]; } else if (pts.length === 7) { cat = pts[5] === '1' ? 'fixed' : 'variable'; memo = pts[6]; } else if (pts.length >= 8) { cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5]; isDone = pts[6] === '1'; memo = pts.slice(7).join(','); }
                                 currP = { id: Number(pts[0]), name: pts[1], amount: pts[2], dueDate: dueDate, accountId: accountId, category: cat, isDone: isDone, memo: memo, subItems: [] };
                                 nP.push(currP);
                             }
@@ -451,14 +453,12 @@
                 } catch (e) { App.state.importMsg = { text: 'データの解析に失敗しました。ファイルが正しくない可能性があります。', isError: true }; App.render(); }
             },
             executeImport: function() {
-                const data = App.state.confirmImportData;
-                if (!data) return;
+                const data = App.state.confirmImportData; if (!data) return;
                 App.state.accounts = data.accounts; App.state.wallets = data.wallets; App.state.incomes = data.incomes; App.state.payments = data.payments; App.state.history = data.history;
                 App.state.importData = ''; App.state.confirmImportData = null; App.state.showSuccessModal = true;
                 App.saveData(); App.render();
             },
 
-            // --- HTML描画パーツ ---
             renderSortButtons: function(type, index, isFirst, isLast) {
                 return `
                     <div class="flex flex-col mr-2 items-center justify-center shrink-0">
@@ -468,29 +468,15 @@
                 `;
             },
             renderCategorySelect: function(name, val) {
-                return `
-                    <select name="${name}" class="w-24 px-1 py-1 text-xs border rounded">
-                        ${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}
-                    </select>
-                `;
+                return `<select name="${name}" class="w-24 px-1 py-1 text-xs border rounded">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`;
             },
             renderCategorySelectLg: function(name, val) {
-                return `
-                    <select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">
-                        ${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}
-                    </select>
-                `;
+                return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`;
             },
             renderAccountSelect: function(name, val) {
-                return `
-                    <select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white">
-                        <option value="">口座未定</option>
-                        ${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}
-                    </select>
-                `;
+                return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}</select>`;
             },
 
-            // --- メイン描画 ---
             render: function() {
                 App.calculateTotals();
                 const appDiv = document.getElementById('app');
@@ -514,13 +500,12 @@
                 if (App.state.activeTab === 'history') html += App.renderHistory();
                 if (App.state.activeTab === 'settings') html += App.renderSettings();
 
-                html += `</div>`; // max-w-6xl end
+                html += `</div>`; 
                 html += App.renderModals();
 
                 appDiv.innerHTML = html;
             },
 
-            // --- サブ描画群 ---
             renderDashboard: function() {
                 const s = App.state;
                 let html = `
@@ -907,7 +892,6 @@
                 `;
             },
 
-            // --- ★ グラフに目盛りを追加・残高のマーカーを見やすく変更 ---
             renderHistory: function() {
                 let html = `
                     <div class="space-y-6 animate-fade-in">
@@ -925,27 +909,28 @@
                 if (App.state.history.length === 0) {
                     html += `<div class="h-64 mt-8 flex items-center justify-center border-b-2 border-gray-200 pb-2 relative"><p class="text-gray-400">履歴データがまだありません</p></div>`;
                 } else {
-                    const maxVal = Math.max(...App.state.history.map(h => Math.max(Number(h.payment) || 0, Number(h.balance) || 0)), 1);
-                    const yAxisValues = [1, 0.75, 0.5, 0.25, 0].map(ratio => Math.floor(maxVal * ratio));
+                    const rawMax = Math.max(...App.state.history.map(h => Math.max(Number(h.payment) || 0, Number(h.balance) || 0)), 1);
+                    const maxVal = App.getNiceMax(rawMax);
+                    const yAxisValues = [1, 0.75, 0.5, 0.25, 0].map(ratio => maxVal * ratio);
                     
-                    html += `<div class="relative h-[300px] mt-6 flex">`;
+                    html += `<div class="relative h-[380px] mt-6 flex">`;
                     
-                    // Y軸目盛り（左側）
+                    // Y軸目盛り（綺麗な数字）
                     html += `
-                        <div class="w-14 shrink-0 flex flex-col justify-between items-end pr-2 pb-8 text-[10px] text-gray-400 font-mono z-10 bg-white border-r border-gray-100">
+                        <div class="w-16 shrink-0 flex flex-col justify-between items-end pr-2 pb-8 pt-20 text-[10px] text-gray-400 font-mono z-10 bg-white border-r border-gray-100">
                             ${yAxisValues.map(val => `<span>${val === 0 ? '0' : App.formatCurrency(val).replace('￥', '¥').replace('.00', '')}</span>`).join('')}
                         </div>
                     `;
 
-                    // グラフエリア（横スクロール）
+                    // グラフエリア
                     html += `
                         <div class="flex-1 overflow-x-auto hide-scrollbar relative border-b-2 border-gray-200 pb-8">
                             <!-- 背景の点線ガイド -->
-                            <div class="absolute inset-0 flex flex-col justify-between pointer-events-none z-0 pb-8">
+                            <div class="absolute inset-0 flex flex-col justify-between pointer-events-none z-0 pb-8 pt-20 px-2 min-w-full">
                                 ${[1, 2, 3, 4, 5].map(() => `<div class="w-full border-t border-gray-200 border-dashed"></div>`).join('')}
                             </div>
                             
-                            <div class="flex items-end justify-around gap-6 h-full px-4 min-w-max relative z-10">
+                            <div class="flex items-end justify-around gap-6 h-full px-4 min-w-max relative z-10 pt-20">
                     `;
                     
                     App.state.history.forEach(data => {
@@ -954,7 +939,7 @@
                         const paymentHeight = (paymentValue / maxVal) * 100;
                         const isShort = balanceValue < 0;
                         
-                        // カテゴリ別積み上げ棒グラフ
+                        // カテゴリ別積み上げ棒
                         let barsHTML = '';
                         if (data.catTotals && paymentValue > 0) {
                             const c = data.catTotals;
@@ -977,29 +962,30 @@
                             barsHTML = `<div class="w-full h-full bg-rose-400 rounded-t-sm"></div>`;
                         }
 
-                        // ツールチップ
-                        let tooltipHTML = `<p>発生総支払: ${App.formatCurrency(paymentValue)}</p>`;
+                        // ツールチップ詳細
+                        let tooltipHTML = `<p class="border-b border-gray-600 pb-1 mb-1">発生総支払: ${App.formatCurrency(paymentValue)}</p>`;
                         if (data.catTotals) {
-                            tooltipHTML += `<div class="text-[10px] text-gray-300 mt-1 border-t border-gray-600 pt-1">`;
-                            if (data.catTotals.loan) tooltipHTML += `<p>ローン: ${App.formatCurrency(data.catTotals.loan)}</p>`;
-                            if (data.catTotals.fixed) tooltipHTML += `<p>固定費: ${App.formatCurrency(data.catTotals.fixed)}</p>`;
-                            if (data.catTotals.variable) tooltipHTML += `<p>変動費: ${App.formatCurrency(data.catTotals.variable)}</p>`;
-                            if (data.catTotals.investment) tooltipHTML += `<p>投資: ${App.formatCurrency(data.catTotals.investment)}</p>`;
+                            tooltipHTML += `<div class="text-[10px] text-gray-300 space-y-0.5">`;
+                            if (data.catTotals.loan) tooltipHTML += `<p class="flex items-center gap-1"><span class="w-2 h-2 bg-purple-400 rounded-full"></span>ローン: ${App.formatCurrency(data.catTotals.loan)}</p>`;
+                            if (data.catTotals.fixed) tooltipHTML += `<p class="flex items-center gap-1"><span class="w-2 h-2 bg-indigo-400 rounded-full"></span>固定費: ${App.formatCurrency(data.catTotals.fixed)}</p>`;
+                            if (data.catTotals.variable) tooltipHTML += `<p class="flex items-center gap-1"><span class="w-2 h-2 bg-rose-400 rounded-full"></span>変動費: ${App.formatCurrency(data.catTotals.variable)}</p>`;
+                            if (data.catTotals.investment) tooltipHTML += `<p class="flex items-center gap-1"><span class="w-2 h-2 bg-emerald-400 rounded-full"></span>投資: ${App.formatCurrency(data.catTotals.investment)}</p>`;
                             tooltipHTML += `</div>`;
                         }
-                        tooltipHTML += `<p class="mt-1 font-bold text-emerald-300">月末残高: ${App.formatCurrency(balanceValue)}</p>`;
+                        tooltipHTML += `<p class="mt-1.5 pt-1 border-t border-gray-600 font-bold text-emerald-300">月末残高: ${App.formatCurrency(balanceValue)}</p>`;
 
                         html += `
-                                <div class="flex flex-col items-center group w-10 shrink-0 h-full relative">
-                                    <div class="opacity-0 group-hover:opacity-100 transition-opacity absolute top-0 bg-gray-800 text-white text-xs p-2 rounded pointer-events-none z-20 whitespace-nowrap -translate-y-full mt-[-8px]">
-                                        ${tooltipHTML}
+                                <div class="flex flex-col items-center group w-10 shrink-0 h-full relative" tabindex="0">
+                                    <div class="opacity-0 group-focus:opacity-100 md:group-hover:opacity-100 transition-opacity absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs p-3 rounded-xl pointer-events-none z-50 whitespace-nowrap shadow-xl">
+                                        <div class="absolute -bottom-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 bg-gray-800 rotate-45"></div>
+                                        <div class="relative z-10">${tooltipHTML}</div>
                                     </div>
                                     <div class="w-full h-full flex justify-center items-end relative">
                                         <div class="w-full max-w-[32px] flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden z-10" style="height: ${paymentHeight}%;">
                                             ${barsHTML}
                                         </div>
                                         <!-- 月末残高の横線マーカー -->
-                                        <div class="absolute w-[140%] h-1.5 z-20 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -2)}%; box-shadow: 0 1px 2px rgba(0,0,0,0.3);"></div>
+                                        <div class="absolute w-[160%] h-1 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -1)}%;"></div>
                                     </div>
                                     <span class="text-xs text-gray-500 mt-2 font-bold whitespace-nowrap absolute -bottom-6">${escapeHTML(data.label)}</span>
                                 </div>
@@ -1017,7 +1003,7 @@
                             <div class="flex justify-center gap-4 mt-6 text-[10px] sm:text-xs text-gray-600 flex-wrap">
                                 <span class="flex items-center gap-1"><div class="w-3 h-3 bg-purple-400 rounded-sm"></div>ローン</span>
                                 <span class="flex items-center gap-1"><div class="w-3 h-3 bg-indigo-400 rounded-sm"></div>固定費</span>
-                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-rose-400 rounded-sm"></div>変動費(旧仕様分含)</span>
+                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-rose-400 rounded-sm"></div>変動費</span>
                                 <span class="flex items-center gap-1"><div class="w-3 h-3 bg-emerald-400 rounded-sm"></div>投資</span>
                                 <span class="flex items-center gap-1 ml-4"><div class="w-4 h-1.5 bg-emerald-500 rounded-full"></div>月末残高（黒字）</span>
                                 <span class="flex items-center gap-1"><div class="w-4 h-1.5 bg-red-500 rounded-full"></div>月末残高（赤字）</span>
@@ -1252,7 +1238,7 @@
                             label, 
                             payment: App.totals.totalPaymentsNum, 
                             balance: App.totals.calculatedEndBalance,
-                            catTotals: App.totals.allCatTotals // カテゴリごとの内訳を保存
+                            catTotals: App.totals.allCatTotals
                         };
                         existingHistory.push(autoRecord);
                         existingHistory.sort((a, b) => a.id.localeCompare(b.id));
