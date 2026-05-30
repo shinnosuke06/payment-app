@@ -46,19 +46,27 @@
         // ----------------------------------------------------
         // アプリケーションの全ロジック
         // ----------------------------------------------------
-        const STORAGE_KEY = 'mpm_vanilla_v6_'; 
+        const STORAGE_KEY = 'mpm_vanilla_v7_'; 
 
         const escapeHTML = (str) => {
             return String(str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         };
 
         const CAT_LABELS = {
-            'loan': { label: 'ローン', icon: 'home', color: 'text-purple-600', bg: 'bg-purple-100', border: 'border-purple-200' },
-            'fixed': { label: '固定費', icon: 'receipt_long', color: 'text-indigo-600', bg: 'bg-indigo-100', border: 'border-indigo-200' },
-            'variable': { label: '変動費', icon: 'credit_card', color: 'text-rose-600', bg: 'bg-rose-100', border: 'border-rose-200' },
-            'investment': { label: '投資', icon: 'trending_up', color: 'text-emerald-600', bg: 'bg-emerald-100', border: 'border-emerald-200' }
+            'loan': { label: 'ローン', icon: 'home', color: 'text-purple-600', bg: 'bg-purple-400', border: 'border-purple-200' },
+            'fixed': { label: '固定費', icon: 'receipt_long', color: 'text-indigo-600', bg: 'bg-indigo-400', border: 'border-indigo-200' },
+            'variable': { label: '変動費', icon: 'credit_card', color: 'text-rose-600', bg: 'bg-rose-400', border: 'border-rose-200' },
+            'investment': { label: '投資', icon: 'trending_up', color: 'text-emerald-600', bg: 'bg-emerald-400', border: 'border-emerald-200' }
         };
-        const SAFE_CAT = { label: '未分類', icon: 'payments', color: 'text-gray-600', bg: 'bg-gray-100', border: 'border-gray-200' };
+        const SAFE_CAT = { label: '未分類', icon: 'payments', color: 'text-gray-600', bg: 'bg-gray-400', border: 'border-gray-200' };
+
+        // 項目ごとに自動で割り当てるカラーパレット（Tailwindの背景色クラス）
+        const ITEM_COLORS = [
+            'bg-red-400', 'bg-orange-400', 'bg-amber-400', 'bg-yellow-400', 'bg-lime-400',
+            'bg-green-400', 'bg-emerald-400', 'bg-teal-400', 'bg-cyan-400', 'bg-sky-400',
+            'bg-blue-400', 'bg-indigo-400', 'bg-violet-400', 'bg-purple-400', 'bg-fuchsia-400',
+            'bg-pink-400', 'bg-rose-400'
+        ];
 
         const ICON_MAP = {
             'wallet': 'account_balance_wallet', 'arrow-down-to-line': 'vertical_align_bottom',
@@ -77,7 +85,7 @@
         const App = {
             state: {
                 activeTab: 'dashboard', dashTab: 'accounts',
-                chartMode: 'all', // 'all', 'payment', 'income' ★グラフの表示モード
+                chartMode: 'all', // 'all', 'pay_cat', 'pay_item', 'inc_item'
                 accounts: [], wallets: [], incomes: [], payments: [], history: [],
                 expandedPayIds: new Set(), editMode: null, deleteTarget: null,
                 selectedAccountPopup: null, preSaveModal: null, showAutoSaveModal: false,
@@ -90,6 +98,17 @@
             getIconHTML: function(name, size = 24, className = '') {
                 const mappedName = ICON_MAP[name] || name;
                 return `<span class="material-symbols-outlined ${className}" style="font-size: ${size}px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;">${mappedName}</span>`;
+            },
+
+            // 文字列から色を決定するハッシュ関数
+            getColorForName: function(name) {
+                if (!name) return 'bg-gray-400';
+                let hash = 0;
+                for (let i = 0; i < name.length; i++) {
+                    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+                }
+                hash = Math.abs(hash);
+                return ITEM_COLORS[hash % ITEM_COLORS.length];
             },
 
             calcAmount: function(str) {
@@ -159,17 +178,17 @@
             },
 
             loadData: function() {
-                App.state.accounts = App.safeLoadArray([STORAGE_KEY + 'accounts', 'mpm_vanilla_v5_accounts']);
-                App.state.wallets = App.safeLoadArray([STORAGE_KEY + 'wallets', 'mpm_vanilla_v5_wallets']);
-                App.state.incomes = App.safeLoadArray([STORAGE_KEY + 'incomes', 'mpm_vanilla_v5_incomes']);
+                App.state.accounts = App.safeLoadArray([STORAGE_KEY + 'accounts', 'mpm_vanilla_v6_accounts', 'mpm_vanilla_v5_accounts']);
+                App.state.wallets = App.safeLoadArray([STORAGE_KEY + 'wallets', 'mpm_vanilla_v6_wallets', 'mpm_vanilla_v5_wallets']);
+                App.state.incomes = App.safeLoadArray([STORAGE_KEY + 'incomes', 'mpm_vanilla_v6_incomes', 'mpm_vanilla_v5_incomes']);
                 
-                const rawPayments = App.safeLoadArray([STORAGE_KEY + 'payments', 'mpm_vanilla_v5_payments']);
+                const rawPayments = App.safeLoadArray([STORAGE_KEY + 'payments', 'mpm_vanilla_v6_payments', 'mpm_vanilla_v5_payments']);
                 App.state.payments = rawPayments.map(p => ({
                     ...p, category: p.category || (p.isFixed ? 'fixed' : 'variable'), 
                     subItems: (Array.isArray(p.subItems) ? p.subItems : []).map(s => ({...s, category: s.category || (s.isFixed ? 'fixed' : 'variable')}))
                 }));
                 
-                App.state.history = App.safeLoadArray([STORAGE_KEY + 'history', 'mpm_vanilla_v5_history']);
+                App.state.history = App.safeLoadArray([STORAGE_KEY + 'history', 'mpm_vanilla_v6_history', 'mpm_vanilla_v5_history']);
                 App.state.saveMonthStr = App.getCurrentMonthStr();
                 App.state.manualHistoryMonth = App.getPreviousMonthStr();
             },
@@ -251,7 +270,7 @@
                         p.subItems.forEach(sub => {
                             const amt = App.calcAmount(sub.amount);
                             const cat = sub.category || 'variable';
-                            if (details[cat]) details[cat].push({ id: 'd_' + Date.now() + Math.random().toString(), name: sub.name, amount: amt });
+                            if (details[cat] && amt > 0) details[cat].push({ id: 'd_' + Date.now() + Math.random().toString(), name: sub.name, amount: amt });
                             subTotal += amt;
                         });
                     }
@@ -264,9 +283,18 @@
                 return details;
             },
 
+            createIncomeDetails: function() {
+                let details = [];
+                App.state.incomes.forEach(i => {
+                    const amt = App.calcAmount(i.amount);
+                    if (amt > 0) details.push({ id: 'i_' + Date.now() + Math.random().toString(), name: i.name, amount: amt });
+                });
+                return details;
+            },
+
             setTab: function(tab) { App.state.activeTab = tab; App.render(); },
             setDashTab: function(tab) { App.state.dashTab = tab; App.render(); },
-            setChartMode: function(mode) { App.state.chartMode = mode; App.render(); }, // ★ グラフモード切り替え
+            setChartMode: function(mode) { App.state.chartMode = mode; App.render(); },
             
             selectHistory: function(id) {
                 if (App.state.historyEditMode) return;
@@ -349,7 +377,6 @@
                 }
             },
 
-            // --- ★ 保存時のincome追加 ---
             triggerSaveHistory: function() {
                 const monthStr = document.getElementById('manualHistoryMonth').value;
                 if (!monthStr) return;
@@ -357,9 +384,10 @@
                 App.state.preSaveModal = {
                     id: monthStr, label: `${year.slice(2)}年${parseInt(month, 10)}月`,
                     payment: App.totals.totalPaymentsNum, balance: App.totals.calculatedEndBalance,
-                    income: App.totals.totalIncomesList, // ★ 収入を追加保存
+                    income: App.totals.totalIncomesList,
                     catTotals: App.totals.allCatTotals,
-                    details: App.createHistoryDetails()
+                    details: App.createHistoryDetails(),
+                    incomeDetails: App.createIncomeDetails() // 収入の詳細も保存
                 };
                 App.render();
             },
@@ -367,9 +395,9 @@
                 const p = App.state.preSaveModal; if (!p) return;
                 const payment = Number(document.getElementById('pre-save-payment').value) || 0;
                 const balance = Number(document.getElementById('pre-save-balance').value) || 0;
-                const income = Number(document.getElementById('pre-save-income').value) || 0; // ★ 収入取得
+                const income = Number(document.getElementById('pre-save-income').value) || 0;
                 const filtered = App.state.history.filter(h => h.id !== p.id);
-                App.state.history = [...filtered, { id: p.id, label: p.label, payment, balance, income, catTotals: p.catTotals, details: p.details }].sort((a, b) => a.id.localeCompare(b.id));
+                App.state.history = [...filtered, { id: p.id, label: p.label, payment, balance, income, catTotals: p.catTotals, details: p.details, incomeDetails: p.incomeDetails }].sort((a, b) => a.id.localeCompare(b.id));
                 App.state.preSaveModal = null; App.saveData(); App.render();
             },
             
@@ -378,16 +406,21 @@
                 if (!sel) return;
                 App.state.historyEditMode = id; 
                 let temp = JSON.parse(JSON.stringify(sel));
+                // 過去データの互換補完
                 if (!temp.details) {
                     temp.details = { loan: [], fixed: [], variable: [], investment: [] };
                     if (temp.catTotals) { Object.keys(temp.catTotals).forEach(cat => { if (temp.catTotals[cat] > 0) temp.details[cat].push({ id: 'old_'+cat, name: CAT_LABELS[cat].label + '合計', amount: temp.catTotals[cat] }); }); } 
                     else { temp.details.variable.push({ id: 'old_all', name: '過去の支払い合計', amount: temp.payment }); }
                 }
-                if(temp.income === undefined) temp.income = 0; // 古いデータ用
+                if(temp.income === undefined) temp.income = 0;
+                if(!temp.incomeDetails) {
+                    temp.incomeDetails = temp.income > 0 ? [{ id: 'old_inc', name: '過去の収入合計', amount: temp.income }] : [];
+                }
                 App.state.tempHistoryEditData = temp;
                 App.render(); 
             },
             cancelHistoryEdit: function() { App.state.historyEditMode = null; App.state.tempHistoryEditData = null; App.render(); },
+            
             updateTempHistoryDetail: function(cat, itemId, amountStr) {
                 const temp = App.state.tempHistoryEditData;
                 if (!temp || !temp.details || !temp.details[cat]) return;
@@ -400,6 +433,17 @@
                 }
                 App.render();
             },
+            updateTempHistoryIncomeDetail: function(itemId, amountStr) {
+                const temp = App.state.tempHistoryEditData;
+                if (!temp || !temp.incomeDetails) return;
+                const item = temp.incomeDetails.find(i => i.id === itemId);
+                if (item) {
+                    item.amount = amountStr;
+                    temp.income = 0;
+                    temp.incomeDetails.forEach(d => { temp.income += App.calcAmount(d.amount); });
+                }
+                App.render();
+            },
             updateTempHistoryBalance: function(amountStr) { if(App.state.tempHistoryEditData) App.state.tempHistoryEditData.balance = App.calcAmount(amountStr); },
             updateTempHistoryIncome: function(amountStr) { if(App.state.tempHistoryEditData) App.state.tempHistoryEditData.income = App.calcAmount(amountStr); },
             
@@ -408,12 +452,10 @@
                 const id = App.state.historyEditMode; const temp = App.state.tempHistoryEditData; if (!temp) return;
                 const balInput = document.getElementById('edit-hist-balance'); if (balInput) temp.balance = App.calcAmount(balInput.value);
                 const incInput = document.getElementById('edit-hist-income'); if (incInput) temp.income = App.calcAmount(incInput.value);
-                
                 App.state.history = App.state.history.map(h => h.id === id ? temp : h);
                 App.state.historyEditMode = null; App.state.tempHistoryEditData = null; App.saveData(); App.render();
             },
 
-            // --- バックアップ（income拡張） ---
             safeMemo: function(memo) { return String(memo || '').replace(/,/g, '，').replace(/\n/g, ' '); },
             generateExportText: function() {
                 let txt = "---支払い管理バックアップ---\n\n【手元現金】\n";
@@ -430,8 +472,8 @@
                 txt += "\n【履歴】\n";
                 App.state.history.forEach(h => {
                     const detailsBase64 = h.details ? btoa(unescape(encodeURIComponent(JSON.stringify(h.details)))) : '';
-                    // 10番目の要素に income を追加
-                    txt += `${h.id},${h.label},${h.payment},${h.balance},${h.catTotals?.loan||0},${h.catTotals?.fixed||0},${h.catTotals?.variable||0},${h.catTotals?.investment||0},${detailsBase64},${h.income||0}\n`;
+                    const incomeDetailsBase64 = h.incomeDetails ? btoa(unescape(encodeURIComponent(JSON.stringify(h.incomeDetails)))) : '';
+                    txt += `${h.id},${h.label},${h.payment},${h.balance},${h.catTotals?.loan||0},${h.catTotals?.fixed||0},${h.catTotals?.variable||0},${h.catTotals?.investment||0},${detailsBase64},${h.income||0},${incomeDetailsBase64}\n`;
                 });
                 return txt;
             },
@@ -467,7 +509,9 @@
                             if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { incAmt = pts[3]; memo = pts[4]; } else if (pts.length >= 6) { incAmt = pts[3]; isIncDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
                             nA.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], incomingAmount: incAmt, isIncomingDone: isIncDone, memo: memo });
                         }
-                        else if (mode === '【手元現金】' && pts.length >= 3) { nW.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], outgoAmount: pts[3] || '', isOutgoDone: pts[4] === '1', isOutgoFixed: pts[5] === '1', memo: pts.slice(6).join(',') }); }
+                        else if (mode === '【手元現金】' && pts.length >= 3) {
+                            nW.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], outgoAmount: pts[3] || '', isOutgoDone: pts[4] === '1', isOutgoFixed: pts[5] === '1', memo: pts.slice(6).join(',') });
+                        }
                         else if (mode === '【入金】' && pts.length >= 3) {
                             let isFixed = false; let isDone = false; let memo = '';
                             if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { isFixed = pts[3] === '1'; memo = pts[4]; } else if (pts.length >= 6) { isFixed = pts[3] === '1'; isDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
@@ -487,14 +531,15 @@
                                 nP.push(currP);
                             }
                         } else if (mode === '【履歴】' && pts.length >= 4) {
-                            let catTotals = null; let details = null; let income = 0;
+                            let catTotals = null; let details = null; let income = 0; let incomeDetails = null;
                             if (pts.length >= 8) {
                                 catTotals = { loan: Number(pts[4])||0, fixed: Number(pts[5])||0, variable: Number(pts[6])||0, investment: Number(pts[7])||0 };
                                 if (catTotals.loan === 0 && catTotals.fixed === 0 && catTotals.variable === 0 && catTotals.investment === 0) catTotals = null;
                             }
                             if (pts.length >= 9 && pts[8]) { try { details = JSON.parse(decodeURIComponent(escape(atob(pts[8])))); } catch(e) {} }
-                            if (pts.length >= 10 && pts[9]) { income = Number(pts[9]) || 0; } // ★ 収入データの読み込み
-                            nH.push({ id: pts[0], label: pts[1], payment: Number(pts[2]), balance: Number(pts[3]), catTotals, details, income });
+                            if (pts.length >= 10 && pts[9]) { income = Number(pts[9]) || 0; }
+                            if (pts.length >= 11 && pts[10]) { try { incomeDetails = JSON.parse(decodeURIComponent(escape(atob(pts[10])))); } catch(e) {} }
+                            nH.push({ id: pts[0], label: pts[1], payment: Number(pts[2]), balance: Number(pts[3]), catTotals, details, income, incomeDetails });
                         }
                     }
                     App.state.confirmImportData = { accounts: nA, wallets: nW, incomes: nI, payments: nP, history: nH }; App.state.importMsg = { text: '', isError: false }; App.render();
@@ -539,7 +584,6 @@
                 appDiv.innerHTML = html;
             },
 
-            // --- サブ描画群 ---
             renderDashboard: function() {
                 const s = App.state;
                 let html = `
@@ -561,7 +605,6 @@
                 const s = App.state;
                 let html = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">`;
                 
-                // 口座セクション
                 html += `
                     <div class="rounded-2xl p-5 shadow-sm border bg-blue-50/50 border-blue-100">
                         <div class="flex items-center justify-between mb-4">
@@ -593,28 +636,15 @@
                                     <div class="flex justify-between items-start mb-1">
                                         <span class="font-bold text-gray-800">${escapeHTML(item.name)}</span>
                                         <div class="flex gap-1 shrink-0">
-                                            ${App.calcAmount(item.incomingAmount) > 0 ? `
-                                                <button type="button" onclick="App.toggleDone('account', ${item.id}, event)" class="text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isIncomingDone ? 'bg-emerald-100 text-emerald-800' : 'text-gray-500'}">
-                                                    ${App.getIconHTML(item.isIncomingDone ? 'check' : 'done', 12)} 入金${item.isIncomingDone ? '済' : '予定'}
-                                                </button>
-                                            ` : ''}
+                                            ${App.calcAmount(item.incomingAmount) > 0 ? `<button type="button" onclick="App.toggleDone('account', ${item.id}, event)" class="text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isIncomingDone ? 'bg-emerald-100 text-emerald-800' : 'text-gray-500'}">${App.getIconHTML(item.isIncomingDone ? 'check' : 'done', 12)} 入金${item.isIncomingDone ? '済' : '予定'}</button>` : ''}
                                             <button type="button" onclick="App.startEdit('account', ${item.id}, event)" class="text-gray-400 hover:text-blue-500 p-0.5">${App.getIconHTML('pencil', 16)}</button>
                                             <button type="button" onclick="App.requestDelete('account', ${item.id}, '${escapeHTML(item.name)}', event)" class="text-gray-400 hover:text-red-500 p-0.5">${App.getIconHTML('trash-2', 16)}</button>
                                         </div>
                                     </div>
                                     ${item.memo ? `<div class="text-[10px] text-gray-400 mb-2 truncate">${App.getIconHTML('message-square', 10)} ${escapeHTML(item.memo)}</div>` : ''}
                                     <div class="flex justify-between items-end gap-2">
-                                        <div class="flex-1">
-                                            <span class="text-[10px] text-gray-500 block">残高</span>
-                                            ${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}
-                                            ${App.calcAmount(item.incomingAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isIncomingDone ? 'text-gray-400 line-through font-normal' : 'text-emerald-600'}">+${App.getDisplayAmountHTML(item.incomingAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}
-                                        </div>
-                                        ${(activeOut > 0 || incAmt > 0) ? `
-                                            <div class="flex-1 text-right pl-2 border-l border-gray-100">
-                                                <span class="text-[10px] text-gray-500 block">引落後予想</span>
-                                                <span class="font-bold text-sm ${isShort ? 'text-red-600' : 'text-emerald-600'}">${App.formatCurrency(expectedBal)}</span>
-                                            </div>
-                                        ` : ''}
+                                        <div class="flex-1"><span class="text-[10px] text-gray-500 block">残高</span>${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}${App.calcAmount(item.incomingAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isIncomingDone ? 'text-gray-400 line-through font-normal' : 'text-emerald-600'}">+${App.getDisplayAmountHTML(item.incomingAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}</div>
+                                        ${(activeOut > 0 || incAmt > 0) ? `<div class="flex-1 text-right pl-2 border-l border-gray-100"><span class="text-[10px] text-gray-500 block">引落後予想</span><span class="font-bold text-sm ${isShort ? 'text-red-600' : 'text-emerald-600'}">${App.formatCurrency(expectedBal)}</span></div>` : ''}
                                     </div>
                                 </div>
                             </div>
@@ -630,7 +660,6 @@
                     </div>
                 `;
 
-                // 手元現金セクション
                 html += `
                     <div class="rounded-2xl p-5 shadow-sm border bg-amber-50/50 border-amber-100">
                         <div class="flex items-center justify-between mb-4">
@@ -658,28 +687,15 @@
                                     <div class="flex justify-between items-start mb-1">
                                         <span class="font-bold text-gray-800">${escapeHTML(item.name)}</span>
                                         <div class="flex gap-1 shrink-0">
-                                            ${App.calcAmount(item.outgoAmount) > 0 ? `
-                                                <button type="button" onclick="App.toggleDone('wallet', ${item.id}, event)" class="text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isOutgoDone ? 'bg-amber-100 text-amber-800' : 'text-gray-500'}">
-                                                    ${App.getIconHTML(item.isOutgoDone ? 'check' : 'done', 12)} 消費${item.isOutgoDone ? '済' : '予定'}
-                                                </button>
-                                            ` : ''}
+                                            ${App.calcAmount(item.outgoAmount) > 0 ? `<button type="button" onclick="App.toggleDone('wallet', ${item.id}, event)" class="text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isOutgoDone ? 'bg-amber-100 text-amber-800' : 'text-gray-500'}">${App.getIconHTML(item.isOutgoDone ? 'check' : 'done', 12)} 消費${item.isOutgoDone ? '済' : '予定'}</button>` : ''}
                                             <button type="button" onclick="App.startEdit('wallet', ${item.id}, event)" class="text-gray-400 hover:text-amber-500 p-0.5">${App.getIconHTML('pencil', 16)}</button>
                                             <button type="button" onclick="App.requestDelete('wallet', ${item.id}, '${escapeHTML(item.name)}', event)" class="text-gray-400 hover:text-red-500 p-0.5">${App.getIconHTML('trash-2', 16)}</button>
                                         </div>
                                     </div>
                                     ${item.memo ? `<div class="text-[10px] text-gray-400 mb-2 truncate">${App.getIconHTML('message-square', 10)} ${escapeHTML(item.memo)}</div>` : ''}
                                     <div class="flex justify-between items-end gap-2">
-                                        <div class="flex-1">
-                                            <span class="text-[10px] text-gray-500 block">残高</span>
-                                            ${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}
-                                            ${App.calcAmount(item.outgoAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isOutgoDone ? 'text-gray-400 line-through font-normal' : 'text-rose-600'}">-${App.getDisplayAmountHTML(item.outgoAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}
-                                        </div>
-                                        ${activeOut > 0 ? `
-                                            <div class="flex-1 text-right pl-2 border-l border-gray-100">
-                                                <span class="text-[10px] text-gray-500 block">消費後予想</span>
-                                                <span class="font-bold text-sm ${expectedBal < 0 ? 'text-red-600' : 'text-amber-600'}">${App.formatCurrency(expectedBal)}</span>
-                                            </div>
-                                        ` : ''}
+                                        <div class="flex-1"><span class="text-[10px] text-gray-500 block">残高</span>${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}${App.calcAmount(item.outgoAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isOutgoDone ? 'text-gray-400 line-through font-normal' : 'text-rose-600'}">-${App.getDisplayAmountHTML(item.outgoAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}</div>
+                                        ${activeOut > 0 ? `<div class="flex-1 text-right pl-2 border-l border-gray-100"><span class="text-[10px] text-gray-500 block">消費後予想</span><span class="font-bold text-sm ${expectedBal < 0 ? 'text-red-600' : 'text-amber-600'}">${App.formatCurrency(expectedBal)}</span></div>` : ''}
                                     </div>
                                 </div>
                             </div>
@@ -926,7 +942,7 @@
                 `;
             },
 
-            // --- ★ グラフ表示切替と折れ線の追加 ---
+            // --- ★ グラフ表示（4モード切替・棒の細身化・カラーパレット対応） ---
             renderHistory: function() {
                 const s = App.state;
                 let html = `
@@ -935,7 +951,7 @@
                             <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 gap-4 pb-4 border-b border-gray-100">
                                 <div>
                                     <h2 class="text-xl font-bold text-gray-800">月次推移グラフ</h2>
-                                    <p class="text-sm text-gray-500 mt-1">棒をタップすると下に詳細が表示されます。</p>
+                                    <p class="text-sm text-gray-500 mt-1">棒をタップすると下に詳細な内訳が表示されます。</p>
                                 </div>
                                 <div class="flex flex-wrap items-center gap-2 bg-indigo-50 p-2 rounded-xl border border-indigo-100 w-full lg:w-auto">
                                     <input type="month" id="manualHistoryMonth" value="${s.manualHistoryMonth}" onchange="App.state.manualHistoryMonth = this.value" class="text-sm px-2 py-1.5 border rounded bg-white font-bold text-indigo-900" />
@@ -943,51 +959,43 @@
                                 </div>
                             </div>
                             
-                            <!-- ★ 表示切替タブ -->
-                            <div class="flex bg-gray-100 p-1 rounded-lg w-max mb-6">
-                                <button onclick="App.setChartMode('all')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all ${s.chartMode==='all'?'bg-white shadow text-gray-800':'text-gray-500 hover:bg-gray-200'}">すべて</button>
-                                <button onclick="App.setChartMode('payment')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all ${s.chartMode==='payment'?'bg-white shadow text-rose-600':'text-gray-500 hover:bg-gray-200'}">支払いのみ</button>
-                                <button onclick="App.setChartMode('income')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all ${s.chartMode==='income'?'bg-white shadow text-emerald-600':'text-gray-500 hover:bg-gray-200'}">収入のみ</button>
+                            <!-- ★ 表示モード切替タブ -->
+                            <div class="flex bg-gray-100 p-1 rounded-lg w-max mb-6 overflow-x-auto hide-scrollbar max-w-full">
+                                <button onclick="App.setChartMode('all')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='all'?'bg-white shadow text-gray-800':'text-gray-500 hover:bg-gray-200'}">すべて</button>
+                                <button onclick="App.setChartMode('pay_cat')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='pay_cat'?'bg-white shadow text-rose-600':'text-gray-500 hover:bg-gray-200'}">支払(カテゴリ別)</button>
+                                <button onclick="App.setChartMode('pay_item')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='pay_item'?'bg-white shadow text-indigo-600':'text-gray-500 hover:bg-gray-200'}">支払(項目別)</button>
+                                <button onclick="App.setChartMode('inc_item')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='inc_item'?'bg-white shadow text-emerald-600':'text-gray-500 hover:bg-gray-200'}">収入(項目別)</button>
                             </div>
                 `;
                 
                 if (s.history.length === 0) {
                     html += `<div class="h-64 mt-8 flex items-center justify-center border-b-2 border-gray-200 pb-2 relative"><p class="text-gray-400">履歴データがまだありません</p></div>`;
                 } else {
-                    // 最大値の計算 (payment, balance, income 全て考慮)
                     const rawMax = Math.max(...s.history.map(h => Math.max(Number(h.payment)||0, Number(h.balance)||0, Number(h.income)||0)), 1);
                     const maxVal = App.getNiceMax(rawMax);
                     const yAxisValues = [1, 0.75, 0.5, 0.25, 0].map(ratio => maxVal * ratio);
                     const len = s.history.length;
 
-                    // ★ SVGで折れ線を生成
+                    // 折れ線(SVG)生成
                     let svgLines = '';
                     for (let i = 0; i < len - 1; i++) {
-                        const h1 = s.history[i];
-                        const h2 = s.history[i+1];
-                        const x1 = ((i + 0.5) / len) * 100;
-                        const x2 = ((i + 1.5) / len) * 100;
+                        const h1 = s.history[i]; const h2 = s.history[i+1];
+                        const x1 = ((i + 0.5) / len) * 100; const x2 = ((i + 1.5) / len) * 100;
                         
-                        // 残高の線（全モードで表示）
                         const yBal1 = Math.max(Math.min((h1.balance / maxVal) * 100, 100), 0);
                         const yBal2 = Math.max(Math.min((h2.balance / maxVal) * 100, 100), 0);
                         svgLines += `<line x1="${x1}%" y1="${100 - yBal1}%" x2="${x2}%" y2="${100 - yBal2}%" stroke="#10b981" stroke-width="2" stroke-dasharray="4 4" />`;
                         
-                        // 支払い推移線
-                        if (s.chartMode === 'payment') {
-                            const yPay1 = Math.min((h1.payment / maxVal) * 100, 100);
-                            const yPay2 = Math.min((h2.payment / maxVal) * 100, 100);
+                        if (s.chartMode === 'pay_cat' || s.chartMode === 'pay_item') {
+                            const yPay1 = Math.min((h1.payment / maxVal) * 100, 100); const yPay2 = Math.min((h2.payment / maxVal) * 100, 100);
                             svgLines += `<line x1="${x1}%" y1="${100 - yPay1}%" x2="${x2}%" y2="${100 - yPay2}%" stroke="#f43f5e" stroke-width="2" stroke-dasharray="4 4" opacity="0.5" />`;
-                        } 
-                        // 収入推移線
-                        else if (s.chartMode === 'income') {
-                            const yInc1 = Math.min(((h1.income||0) / maxVal) * 100, 100);
-                            const yInc2 = Math.min(((h2.income||0) / maxVal) * 100, 100);
+                        } else if (s.chartMode === 'inc_item') {
+                            const yInc1 = Math.min(((h1.income||0) / maxVal) * 100, 100); const yInc2 = Math.min(((h2.income||0) / maxVal) * 100, 100);
                             svgLines += `<line x1="${x1}%" y1="${100 - yInc1}%" x2="${x2}%" y2="${100 - yInc2}%" stroke="#34d399" stroke-width="2" stroke-dasharray="4 4" opacity="0.5" />`;
                         }
                     }
                     
-                    html += `<div class="relative h-[250px] mt-2 flex">`;
+                    html += `<div class="relative h-[280px] mt-2 flex">`;
                     
                     // Y軸
                     html += `
@@ -1003,8 +1011,7 @@
                                 ${[1, 2, 3, 4, 5].map(() => `<div class="w-full border-t border-gray-200 border-dashed"></div>`).join('')}
                             </div>
                             
-                            <div class="flex items-end h-full min-w-max relative z-10">
-                                <!-- ★ 折れ線グラフSVGレイヤー -->
+                            <div class="flex items-end justify-around gap-6 h-full px-4 min-w-max relative z-10">
                                 <svg class="absolute inset-0 w-full h-full pointer-events-none z-0 overflow-visible" preserveAspectRatio="none">
                                     ${svgLines}
                                 </svg>
@@ -1019,40 +1026,81 @@
                         const incomeHeight = (incomeValue / maxVal) * 100;
                         const isShort = balanceValue < 0;
                         
-                        // 支払いの内訳バー生成
-                        let payBarsHTML = '';
+                        // --- 収入の積み上げ作成 ---
+                        let incBarsHTML = '';
+                        const incDetails = data.incomeDetails || (incomeValue > 0 ? [{name: '過去の収入', amount: incomeValue}] : []);
+                        if (incDetails.length === 0) {
+                            incBarsHTML = `<div class="w-full h-full bg-emerald-300 rounded-t-[2px]"></div>`;
+                        } else {
+                            incDetails.forEach(d => {
+                                const h = (d.amount / incomeValue) * 100;
+                                const color = App.getColorForName(d.name);
+                                incBarsHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
+                            });
+                        }
+
+                        // --- 支払いの積み上げ作成（カテゴリ別） ---
+                        let payBarsCatHTML = '';
                         if (data.catTotals && paymentValue > 0) {
                             const c = data.catTotals;
                             const totalCat = (c.loan||0) + (c.fixed||0) + (c.variable||0) + (c.investment||0);
                             if (totalCat === 0) {
-                                payBarsHTML = `<div class="w-full h-full bg-rose-400 rounded-t-sm"></div>`;
+                                payBarsCatHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
                             } else {
                                 const pLoan = ((c.loan||0) / totalCat) * 100; const pFixed = ((c.fixed||0) / totalCat) * 100; const pVar = ((c.variable||0) / totalCat) * 100; const pInv = ((c.investment||0) / totalCat) * 100;
-                                payBarsHTML += pInv > 0 ? `<div style="height: ${pInv}%;" class="bg-emerald-400 w-full"></div>` : '';
-                                payBarsHTML += pVar > 0 ? `<div style="height: ${pVar}%;" class="bg-rose-400 w-full"></div>` : '';
-                                payBarsHTML += pFixed > 0 ? `<div style="height: ${pFixed}%;" class="bg-indigo-400 w-full"></div>` : '';
-                                payBarsHTML += pLoan > 0 ? `<div style="height: ${pLoan}%;" class="bg-purple-400 w-full"></div>` : '';
+                                payBarsCatHTML += pInv > 0 ? `<div style="height: ${pInv}%;" class="bg-emerald-400 w-full rounded-t-[1px]"></div>` : '';
+                                payBarsCatHTML += pVar > 0 ? `<div style="height: ${pVar}%;" class="bg-rose-400 w-full rounded-t-[1px]"></div>` : '';
+                                payBarsCatHTML += pFixed > 0 ? `<div style="height: ${pFixed}%;" class="bg-indigo-400 w-full rounded-t-[1px]"></div>` : '';
+                                payBarsCatHTML += pLoan > 0 ? `<div style="height: ${pLoan}%;" class="bg-purple-400 w-full rounded-t-[1px]"></div>` : '';
                             }
                         } else {
-                            payBarsHTML = `<div class="w-full h-full bg-rose-400 rounded-t-sm"></div>`;
+                            payBarsCatHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
                         }
 
-                        // モード別の表示内容切り替え
+                        // --- 支払いの積み上げ作成（項目別） ---
+                        let payBarsItemHTML = '';
+                        let payItemsMap = {};
+                        if (data.details) {
+                            Object.keys(data.details).forEach(cat => {
+                                data.details[cat].forEach(d => {
+                                    if(!payItemsMap[d.name]) payItemsMap[d.name] = 0;
+                                    payItemsMap[d.name] += d.amount;
+                                });
+                            });
+                        } else if (paymentValue > 0) {
+                            payItemsMap['過去の支払い'] = paymentValue;
+                        }
+                        const payItemNames = Object.keys(payItemsMap);
+                        if (payItemNames.length === 0) {
+                            payBarsItemHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
+                        } else {
+                            payItemNames.forEach(name => {
+                                const h = (payItemsMap[name] / paymentValue) * 100;
+                                const color = App.getColorForName(name);
+                                payBarsItemHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
+                            });
+                        }
+
+                        // ★ モードによる棒の出し分け（太さ1/3対応のため幅をw-2.5にスリム化）
                         let visibleBars = '';
                         if (s.chartMode === 'all') {
                             visibleBars = `
-                                <div class="w-3 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${paymentHeight}%;">${payBarsHTML}</div>
-                                <div class="w-3 bg-emerald-300 transition-all duration-500 rounded-t-sm" style="height: ${incomeHeight}%;"></div>
+                                <div class="flex items-end justify-center gap-1 w-full h-full relative z-10">
+                                    <div class="w-3 bg-emerald-300 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${incomeHeight}%;">${incBarsHTML}</div>
+                                    <div class="w-3 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${paymentHeight}%;">${payBarsCatHTML}</div>
+                                </div>
                             `;
-                        } else if (s.chartMode === 'payment') {
-                            visibleBars = `<div class="w-3 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${paymentHeight}%;">${payBarsHTML}</div>`;
-                        } else if (s.chartMode === 'income') {
-                            visibleBars = `<div class="w-3 bg-emerald-300 transition-all duration-500 rounded-t-sm" style="height: ${incomeHeight}%;"></div>`;
+                        } else if (s.chartMode === 'pay_cat') {
+                            visibleBars = `<div class="w-3.5 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${paymentHeight}%;">${payBarsCatHTML}</div>`;
+                        } else if (s.chartMode === 'pay_item') {
+                            visibleBars = `<div class="w-3.5 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${paymentHeight}%;">${payBarsItemHTML}</div>`;
+                        } else if (s.chartMode === 'inc_item') {
+                            visibleBars = `<div class="w-3.5 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${incomeHeight}%;">${incBarsHTML}</div>`;
                         }
 
                         html += `
-                                <div class="flex flex-col items-center flex-1 min-w-[65px] h-full relative cursor-pointer group" onclick="App.selectHistory('${data.id}')">
-                                    <div class="opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs p-3 rounded-xl pointer-events-none z-50 whitespace-nowrap shadow-xl">
+                                <div class="flex flex-col items-center flex-1 min-w-[50px] h-full relative cursor-pointer group outline-none" onclick="App.selectHistory('${data.id}')" tabindex="0">
+                                    <div class="opacity-0 group-focus:opacity-100 md:group-hover:opacity-100 transition-opacity absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs p-3 rounded-xl pointer-events-none z-50 whitespace-nowrap shadow-xl">
                                         <div class="absolute -bottom-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 bg-gray-800 rotate-45"></div>
                                         <div class="relative z-10">
                                             <p class="font-bold text-emerald-300">総入金: ${App.formatCurrency(incomeValue)}</p>
@@ -1061,12 +1109,12 @@
                                         </div>
                                     </div>
                                     
-                                    <div class="w-full h-full flex justify-center items-end gap-1 relative z-10 transition-all duration-300 ${isSelected ? 'opacity-100 drop-shadow-md scale-105' : (s.selectedHistoryId ? 'opacity-40 grayscale-[50%]' : 'opacity-100 hover:opacity-80')}">
+                                    <div class="w-full h-full flex justify-center items-end relative transition-all duration-300 ${isSelected ? 'opacity-100 drop-shadow-md scale-[1.15]' : (s.selectedHistoryId ? 'opacity-40 grayscale-[50%]' : 'opacity-100 hover:opacity-80')}">
                                         ${visibleBars}
                                         <!-- 月末残高マーカー -->
-                                        <div class="absolute w-8 h-1 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -2)}%;"></div>
+                                        <div class="absolute w-8 h-1 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -2)}%; left:50%; transform:translateX(-50%);"></div>
                                     </div>
-                                    <span class="text-xs ${isSelected ? 'text-indigo-600 font-black' : 'text-gray-500 font-bold'} mt-2 whitespace-nowrap absolute -bottom-6">${escapeHTML(data.label)}</span>
+                                    <span class="text-[10px] ${isSelected ? 'text-indigo-600 font-black' : 'text-gray-500 font-bold'} mt-2 whitespace-nowrap absolute -bottom-6">${escapeHTML(data.label)}</span>
                                 </div>
                         `;
                     });
@@ -1078,20 +1126,28 @@
                     `;
                 }
                 
-                // 凡例
+                // モード別の凡例
+                let legendHTML = '';
+                if (s.chartMode === 'all' || s.chartMode === 'pay_cat') {
+                    legendHTML = `
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-purple-400 rounded-sm"></div>ローン</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></div>固定費</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-rose-400 rounded-sm"></div>変動費</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-emerald-400 rounded-sm"></div>投資</span>
+                    `;
+                } else if (s.chartMode === 'pay_item' || s.chartMode === 'inc_item') {
+                    legendHTML = `<span class="text-gray-500 font-bold">※項目名ごとに自動で色が割り当てられています</span>`;
+                }
+
                 html += `
                             <div class="flex justify-center gap-4 mt-6 text-[10px] sm:text-xs text-gray-600 flex-wrap">
-                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-emerald-300 rounded-sm"></div>入金(収入)</span>
-                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-purple-400 rounded-sm"></div>ローン</span>
-                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-indigo-400 rounded-sm"></div>固定費</span>
-                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-rose-400 rounded-sm"></div>変動費</span>
-                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-emerald-400 rounded-sm"></div>投資</span>
+                                ${legendHTML}
                                 <span class="flex items-center gap-1 ml-4"><div class="w-4 h-1 border-t-2 border-dashed border-emerald-500"></div>残高の推移</span>
                             </div>
                         </div>
                 `;
 
-                // 詳細・編集エリア
+                // ★ グラフ下の詳細・個別の明細編集エリア
                 if (s.selectedHistoryId) {
                     const sel = s.history.find(h => h.id === s.selectedHistoryId);
                     if (sel) {
@@ -1099,6 +1155,7 @@
                         
                         if (s.historyEditMode === sel.id) {
                             const temp = s.tempHistoryEditData;
+                            // 詳細編集モード
                             html += `
                                 <div class="flex items-center justify-between mb-4 border-b pb-3">
                                     <h3 class="text-lg font-black text-indigo-800">${escapeHTML(temp.label)} の内訳を修正</h3>
@@ -1116,9 +1173,28 @@
                                         </div>
                                     </div>
                                     <div class="mt-4 pt-2 border-t border-gray-100">
-                                        <p class="text-sm font-bold text-gray-700 mb-3">各支払いの明細を修正 (自動で総支払が再計算されます)</p>
+                                        <p class="text-sm font-bold text-gray-700 mb-3">各明細を修正 (自動で総額が再計算されます)</p>
                             `;
                             
+                            // 収入の明細編集
+                            if (temp.incomeDetails && temp.incomeDetails.length > 0) {
+                                html += `
+                                    <div class="mb-4 bg-blue-50/50 rounded-xl p-3 border border-blue-100">
+                                        <div class="font-bold text-blue-700 mb-2 border-b border-blue-200 pb-2">入金・収入の内訳</div>
+                                        <div class="space-y-2 pl-2">
+                                `;
+                                temp.incomeDetails.forEach(i => {
+                                    html += `
+                                        <div class="flex justify-between items-center gap-2">
+                                            <span class="text-sm text-gray-600 flex-1 truncate">${escapeHTML(i.name)}</span>
+                                            <input type="number" value="${i.amount}" onchange="App.updateTempHistoryIncomeDetail('${i.id}', this.value)" class="w-24 px-2 py-1 text-sm border rounded bg-white shadow-sm" />
+                                        </div>
+                                    `;
+                                });
+                                html += `</div></div>`;
+                            }
+
+                            // 支払の明細編集
                             Object.keys(CAT_LABELS).forEach(cat => {
                                 const items = temp.details[cat];
                                 if (items && items.length > 0) {
@@ -1152,6 +1228,7 @@
                                 </form>
                             `;
                         } else {
+                            // 詳細表示モード
                             html += `
                                 <div class="flex items-center justify-between mb-6">
                                     <h3 class="text-xl font-black text-indigo-900 border-l-4 border-indigo-500 pl-3">${escapeHTML(sel.label)} の詳細</h3>
@@ -1163,7 +1240,19 @@
                                     <div class="bg-blue-50 rounded-xl p-5 border border-blue-100 flex flex-col justify-start">
                                         <p class="text-sm text-blue-700 font-bold mb-1">総入金・収入</p>
                                         <p class="text-3xl font-black text-blue-900 mb-4">${App.formatCurrency(sel.income||0)}</p>
-                                    </div>
+                            `;
+                            
+                            if (sel.incomeDetails && sel.incomeDetails.length > 0) {
+                                html += `<ul class="text-xs text-gray-600 space-y-1 border-t border-blue-200 pt-3">`;
+                                sel.incomeDetails.forEach(i => {
+                                    html += `<li class="flex justify-between items-center"><div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm ${App.getColorForName(i.name)}"></span><span class="truncate">${escapeHTML(i.name)}</span></div><span class="font-bold">${App.formatCurrency(i.amount)}</span></li>`;
+                                });
+                                html += `</ul>`;
+                            } else {
+                                html += `<p class="text-[10px] text-gray-400 mt-2 border-t border-blue-200 pt-2">内訳データはありません</p>`;
+                            }
+
+                            html += `</div>
                                     <!-- 支払 -->
                                     <div class="bg-gray-50 rounded-xl p-5 border border-gray-100 flex flex-col justify-start">
                                         <p class="text-sm text-gray-500 font-bold mb-1">発生総支払</p>
@@ -1183,20 +1272,13 @@
                                                     <span>${App.formatCurrency(catTot)}</span>
                                                 </div>
                                                 <ul class="text-xs text-gray-500 pl-4 space-y-1">
-                                                    ${items.map(i => `<div class="flex justify-between"><span>${escapeHTML(i.name)}</span><span>${App.formatCurrency(i.amount)}</span></div>`).join('')}
+                                                    ${items.map(i => `<li class="flex justify-between items-center"><div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm ${App.getColorForName(i.name)}"></span><span class="truncate">${escapeHTML(i.name)}</span></div><span>${App.formatCurrency(i.amount)}</span></li>`).join('')}
                                                 </ul>
                                             </div>
                                         `;
                                     }
                                 });
                                 html += `</div>`;
-                            } else if (sel.catTotals) {
-                                html += `<div class="space-y-2 border-t border-gray-200 pt-4">`;
-                                if (sel.catTotals.loan) html += `<div class="flex justify-between items-center text-sm"><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-purple-400 rounded-sm"></span>ローン</span><span class="font-bold text-gray-700">${App.formatCurrency(sel.catTotals.loan)}</span></div>`;
-                                if (sel.catTotals.fixed) html += `<div class="flex justify-between items-center text-sm"><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></span>固定費</span><span class="font-bold text-gray-700">${App.formatCurrency(sel.catTotals.fixed)}</span></div>`;
-                                if (sel.catTotals.variable) html += `<div class="flex justify-between items-center text-sm"><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-rose-400 rounded-sm"></span>変動費</span><span class="font-bold text-gray-700">${App.formatCurrency(sel.catTotals.variable)}</span></div>`;
-                                if (sel.catTotals.investment) html += `<div class="flex justify-between items-center text-sm"><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-emerald-400 rounded-sm"></span>投資</span><span class="font-bold text-gray-700">${App.formatCurrency(sel.catTotals.investment)}</span></div>`;
-                                html += `</div><p class="text-[10px] text-gray-400 mt-3 pt-2 border-t border-gray-200">※古いデータのため個別の明細はありません。</p>`;
                             } else {
                                 html += `<p class="text-xs text-gray-400 mt-3 border-t border-gray-200 pt-3">内訳データはありません</p>`;
                             }
@@ -1223,6 +1305,13 @@
                         }
                         html += `</div>`;
                     }
+                } else {
+                    html += `
+                        <div class="bg-white rounded-2xl p-8 border-2 border-gray-100 border-dashed text-center mt-6 shadow-sm">
+                            <div class="inline-flex items-center justify-center w-12 h-12 bg-gray-50 rounded-full mb-3 text-gray-400">${App.getIconHTML('bar-chart-3', 28)}</div>
+                            <p class="text-gray-500 font-bold">グラフの棒をタップすると、ここに内訳の詳細が表示されます</p>
+                        </div>
+                    `;
                 }
 
                 html += `</div>`;
@@ -1434,7 +1523,8 @@
                             balance: App.totals.calculatedEndBalance,
                             income: App.totals.totalIncomesList,
                             catTotals: App.totals.allCatTotals,
-                            details: App.createHistoryDetails()
+                            details: App.createHistoryDetails(),
+                            incomeDetails: App.createIncomeDetails()
                         };
                         existingHistory.push(autoRecord);
                         existingHistory.sort((a, b) => a.id.localeCompare(b.id));
