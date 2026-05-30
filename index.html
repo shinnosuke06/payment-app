@@ -11,6 +11,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>毎月の支払い管理</title>
     
+    <!-- Reactは不使用、Tailwindとアイコンのみ -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
 
@@ -43,10 +44,18 @@
     <div id="app"></div>
 
     <script>
-        const STORAGE_KEY = 'mpm_vanilla_v3_';
+        // ----------------------------------------------------
+        // アプリケーションの全ロジック（純粋なJavaScript）
+        // ----------------------------------------------------
+        const STORAGE_KEY = 'mpm_vanilla_v4_';
 
         const escapeHTML = (str) => {
-            return String(str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+            return String(str || '')
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
         };
 
         const CAT_LABELS = {
@@ -92,7 +101,8 @@
                 try {
                     let sanitized = str.toString()
                         .replace(/[０-９＋－＊／．]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
-                        .replace(/\s+/g, '').replace(/[^0-9+\-*/.]/g, '');
+                        .replace(/\s+/g, '')
+                        .replace(/[^0-9+\-*/.]/g, '');
                     if (!sanitized) return 0;
                     const tokens = sanitized.match(/[+\-*/]|[^+\-*/]+/g);
                     if (!tokens) return 0;
@@ -136,23 +146,23 @@
                             const parsed = JSON.parse(data);
                             if (Array.isArray(parsed)) return parsed;
                         }
-                    } catch(e) {}
+                    } catch(e) { console.error("データ読込エラー:", e); }
                 }
                 return [];
             },
 
             loadData: function() {
-                App.state.accounts = App.safeLoadArray([STORAGE_KEY + 'accounts', 'mpm_vanilla_v2_accounts', 'mpm_vanilla_v1_accounts', 'mpm_v14_accounts']);
-                App.state.wallets = App.safeLoadArray([STORAGE_KEY + 'wallets', 'mpm_vanilla_v2_wallets', 'mpm_vanilla_v1_wallets', 'mpm_v14_wallets']);
-                App.state.incomes = App.safeLoadArray([STORAGE_KEY + 'incomes', 'mpm_vanilla_v2_incomes', 'mpm_vanilla_v1_incomes', 'mpm_v14_incomes']);
+                App.state.accounts = App.safeLoadArray([STORAGE_KEY + 'accounts', 'mpm_vanilla_v3_accounts', 'mpm_vanilla_v2_accounts']);
+                App.state.wallets = App.safeLoadArray([STORAGE_KEY + 'wallets', 'mpm_vanilla_v3_wallets', 'mpm_vanilla_v2_wallets']);
+                App.state.incomes = App.safeLoadArray([STORAGE_KEY + 'incomes', 'mpm_vanilla_v3_incomes', 'mpm_vanilla_v2_incomes']);
                 
-                const rawPayments = App.safeLoadArray([STORAGE_KEY + 'payments', 'mpm_vanilla_v2_payments', 'mpm_vanilla_v1_payments', 'mpm_v14_payments']);
+                const rawPayments = App.safeLoadArray([STORAGE_KEY + 'payments', 'mpm_vanilla_v3_payments', 'mpm_vanilla_v2_payments']);
                 App.state.payments = rawPayments.map(p => ({
                     ...p, category: p.category || (p.isFixed ? 'fixed' : 'variable'), 
                     subItems: (Array.isArray(p.subItems) ? p.subItems : []).map(s => ({...s, category: s.category || (s.isFixed ? 'fixed' : 'variable')}))
                 }));
                 
-                App.state.history = App.safeLoadArray([STORAGE_KEY + 'history', 'mpm_vanilla_v2_history', 'mpm_vanilla_v1_history', 'mpm_v14_history']);
+                App.state.history = App.safeLoadArray([STORAGE_KEY + 'history', 'mpm_vanilla_v3_history', 'mpm_vanilla_v2_history']);
                 App.state.saveMonthStr = App.getCurrentMonthStr();
                 App.state.manualHistoryMonth = App.getPreviousMonthStr();
             },
@@ -174,10 +184,8 @@
                 let activeIncomesList = 0, totalIncomesList = 0;
                 let activePayments = 0, totalPaymentsNum = 0;
                 
-                // 未済のみのカテゴリ集計（ダッシュボード用）
                 const catTotals = { loan: 0, fixed: 0, variable: 0, investment: 0 };
-                // 全件のカテゴリ集計（グラフ保存用）
-                const allCatTotals = { loan: 0, fixed: 0, variable: 0, investment: 0 };
+                const allCatTotals = { loan: 0, fixed: 0, variable: 0, investment: 0 }; // 自動保存や手動保存時に渡す全額のカテゴリ
 
                 s.accounts.forEach(a => {
                     totalAccountsNum += App.calcAmount(a.amount);
@@ -288,7 +296,12 @@
                 else { App.state[t.type + 's'] = App.state[t.type + 's'].filter(item => item.id !== t.id); }
                 App.state.deleteTarget = null; App.saveData(); App.render();
             },
-            closeModal: function(modalName) { App.state[modalName] = null; if (modalName === 'showAutoSaveModal') App.state.showAutoSaveModal = false; if (modalName === 'showSuccessModal') App.state.showSuccessModal = false; App.render(); },
+            closeModal: function(modalName) {
+                App.state[modalName] = null;
+                if (modalName === 'showAutoSaveModal') App.state.showAutoSaveModal = false;
+                if (modalName === 'showSuccessModal') App.state.showSuccessModal = false;
+                App.render();
+            },
             openAccountPopup: function(id) { App.state.selectedAccountPopup = id; App.render(); },
 
             startEdit: function(type, id, e) { if (e) e.stopPropagation(); App.state.editMode = { type, id }; App.render(); },
@@ -310,10 +323,12 @@
                 App.state.payments.forEach(p => { p.amount = p.category === 'variable' ? '' : p.amount; p.isDone = false; if (p.subItems) p.subItems.forEach(s => { s.amount = s.category === 'variable' ? '' : s.amount; }); });
             },
             handleManualResetClick: function() {
-                if (window.confirm('すべての「済」を解除し、変動費の金額をリセットします。')) { App.executeMonthlyReset(); App.saveData(); App.render(); alert('リセットしました。'); }
+                if (window.confirm('すべての「済」を解除し、変動費の金額をリセットします。')) {
+                    App.executeMonthlyReset(); App.saveData(); App.render(); alert('リセットしました。');
+                }
             },
 
-            // --- グラフ保存と色分け内訳対応 ---
+            // --- ★ グラフ保存：色分けデータ(catTotals)を含める ---
             triggerSaveHistory: function() {
                 const monthStr = document.getElementById('manualHistoryMonth').value;
                 if (!monthStr) return;
@@ -321,27 +336,31 @@
                 App.state.preSaveModal = {
                     id: monthStr, label: `${year.slice(2)}年${parseInt(month, 10)}月`,
                     payment: App.totals.totalPaymentsNum, balance: App.totals.calculatedEndBalance,
-                    catTotals: App.totals.allCatTotals
+                    catTotals: App.totals.allCatTotals // 内訳を保持
                 };
                 App.render();
             },
             confirmSaveHistory: function() {
-                const p = App.state.preSaveModal; if (!p) return;
+                const p = App.state.preSaveModal;
+                if (!p) return;
                 const payment = Number(document.getElementById('pre-save-payment').value) || 0;
                 const balance = Number(document.getElementById('pre-save-balance').value) || 0;
+                
                 const filtered = App.state.history.filter(h => h.id !== p.id);
-                // 手動保存時は、金額が上書きされても色は残す（整合性はずれるが参考として残す）
+                // 内訳も一緒に保存する
                 App.state.history = [...filtered, { id: p.id, label: p.label, payment, balance, catTotals: p.catTotals }].sort((a, b) => a.id.localeCompare(b.id));
-                App.state.preSaveModal = null; App.saveData(); App.render();
+                App.state.preSaveModal = null;
+                App.saveData(); App.render();
             },
             startHistoryEdit: function(id) { App.state.historyEditMode = id; App.render(); },
             cancelHistoryEdit: function() { App.state.historyEditMode = null; App.render(); },
             saveHistoryEdit: function(id) {
                 const payment = Number(document.getElementById(`edit-hist-${id}-payment`).value) || 0;
                 const balance = Number(document.getElementById(`edit-hist-${id}-balance`).value) || 0;
-                // ペンアイコンで手動修正した場合は内訳比率がおかしくなるため内訳はクリアする
+                // ペンボタンで手動修正した場合は内訳と整合性が合わなくなるためカテゴリ情報を消す
                 App.state.history = App.state.history.map(h => h.id === id ? { ...h, payment, balance, catTotals: null } : h);
-                App.state.historyEditMode = null; App.saveData(); App.render();
+                App.state.historyEditMode = null;
+                App.saveData(); App.render();
             },
 
             // --- バックアップ ---
@@ -360,11 +379,15 @@
                 });
                 txt += "\n【履歴】\n";
                 App.state.history.forEach(h => {
+                    // 内訳データもエクスポートに含める
                     txt += `${h.id},${h.label},${h.payment},${h.balance},${h.catTotals?.loan||0},${h.catTotals?.fixed||0},${h.catTotals?.variable||0},${h.catTotals?.investment||0}\n`;
                 });
                 return txt;
             },
-            handleGenerateExport: function() { try { App.state.exportData = App.generateExportText(); App.state.copySuccess = false; App.state.importMsg = { text: '', isError: false }; App.render(); } catch (e) { App.state.importMsg = { text: '出力エラー', isError: true }; App.render(); } },
+            handleGenerateExport: function() {
+                try { App.state.exportData = App.generateExportText(); App.state.copySuccess = false; App.state.importMsg = { text: '', isError: false }; App.render(); }
+                catch (e) { App.state.importMsg = { text: '出力エラー', isError: true }; App.render(); }
+            },
             handleDownloadExport: function() {
                 try {
                     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([App.generateExportText()], { type: 'text/plain' }));
@@ -382,8 +405,6 @@
                 reader.onload = (ev) => { App.state.importData = ev.target.result; App.state.importMsg = { text: 'ファイルを読み込みました。「復元を実行」を押してください。', isError: false }; App.render(); };
                 reader.readAsText(file); input.value = null;
             },
-            
-            // --- ★過去の全フォーマット対応＋色分け履歴対応の復元パーサー ---
             handleImportClick: function() {
                 const text = document.getElementById('import-data-text').value;
                 if (!text || !text.trim()) { App.state.importMsg = { text: 'データを入力するかファイルを選択してください。', isError: true }; App.render(); return; }
@@ -395,7 +416,9 @@
                         const pts = line.split(',');
                         if (mode === '【口座】' && pts.length >= 3) {
                             let incAmt = ''; let isIncDone = false; let memo = '';
-                            if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { incAmt = pts[3]; memo = pts[4]; } else if (pts.length >= 6) { incAmt = pts[3]; isIncDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
+                            if (pts.length === 4) { memo = pts[3]; }
+                            else if (pts.length === 5) { incAmt = pts[3]; memo = pts[4]; }
+                            else if (pts.length >= 6) { incAmt = pts[3]; isIncDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
                             nA.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], incomingAmount: incAmt, isIncomingDone: isIncDone, memo: memo });
                         }
                         else if (mode === '【手元現金】' && pts.length >= 3) {
@@ -403,7 +426,9 @@
                         }
                         else if (mode === '【入金】' && pts.length >= 3) {
                             let isFixed = false; let isDone = false; let memo = '';
-                            if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { isFixed = pts[3] === '1'; memo = pts[4]; } else if (pts.length >= 6) { isFixed = pts[3] === '1'; isDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
+                            if (pts.length === 4) { memo = pts[3]; }
+                            else if (pts.length === 5) { isFixed = pts[3] === '1'; memo = pts[4]; }
+                            else if (pts.length >= 6) { isFixed = pts[3] === '1'; isDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
                             nI.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], isFixed: isFixed, isDone: isDone, memo: memo });
                         }
                         else if (mode === '【支払い】') {
@@ -414,8 +439,11 @@
                                 currP.subItems.push({ id: Number(pts[0].substring(1)), name: pts[1], amount: pts[2], category: cat, endDate: endDate, memo: memo });
                             }
                             else if (pts.length >= 3) {
-                                let dueDate = pts[3] ? Number(pts[3]) : null; let accountId = pts[4] ? Number(pts[4]) : ''; let cat = 'variable'; let isDone = false; let memo = '';
-                                if (pts.length === 6) { memo = pts[5]; } else if (pts.length === 7) { cat = pts[5] === '1' ? 'fixed' : 'variable'; memo = pts[6]; } else if (pts.length >= 8) { cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5]; isDone = pts[6] === '1'; memo = pts.slice(7).join(','); }
+                                let dueDate = pts[3] ? Number(pts[3]) : null; let accountId = pts[4] ? Number(pts[4]) : '';
+                                let cat = 'variable'; let isDone = false; let memo = '';
+                                if (pts.length === 6) { memo = pts[5]; }
+                                else if (pts.length === 7) { cat = pts[5] === '1' ? 'fixed' : 'variable'; memo = pts[6]; }
+                                else if (pts.length >= 8) { cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5]; isDone = pts[6] === '1'; memo = pts.slice(7).join(','); }
                                 currP = { id: Number(pts[0]), name: pts[1], amount: pts[2], dueDate: dueDate, accountId: accountId, category: cat, isDone: isDone, memo: memo, subItems: [] };
                                 nP.push(currP);
                             }
@@ -434,7 +462,8 @@
                 } catch (e) { App.state.importMsg = { text: 'データの解析に失敗しました。ファイルが正しくない可能性があります。', isError: true }; App.render(); }
             },
             executeImport: function() {
-                const data = App.state.confirmImportData; if (!data) return;
+                const data = App.state.confirmImportData;
+                if (!data) return;
                 App.state.accounts = data.accounts; App.state.wallets = data.wallets; App.state.incomes = data.incomes; App.state.payments = data.payments; App.state.history = data.history;
                 App.state.importData = ''; App.state.confirmImportData = null; App.state.showSuccessModal = true;
                 App.saveData(); App.render();
@@ -450,13 +479,26 @@
                 `;
             },
             renderCategorySelect: function(name, val) {
-                return `<select name="${name}" class="w-24 px-1 py-1 text-xs border rounded">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`;
+                return `
+                    <select name="${name}" class="w-24 px-1 py-1 text-xs border rounded">
+                        ${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}
+                    </select>
+                `;
             },
             renderCategorySelectLg: function(name, val) {
-                return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`;
+                return `
+                    <select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">
+                        ${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}
+                    </select>
+                `;
             },
             renderAccountSelect: function(name, val) {
-                return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}</select>`;
+                return `
+                    <select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white">
+                        <option value="">口座未定</option>
+                        ${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}
+                    </select>
+                `;
             },
 
             // --- メイン描画 ---
@@ -837,7 +879,7 @@
                 html += `
                         </div>
                         <form onsubmit="App.addPayment(event, this)" class="bg-white p-4 rounded-xl border shadow-sm space-y-3">
-                            <div class="flex gap-2"><input name="payName" type="text" placeholder="項目名 (例: 楽天カード)" required class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200"/><input name="payAmount" type="text" placeholder="請求総額 (数式OK)" class="w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200"/></div>
+                            <div class="flex gap-2"><input name="payName" type="text" placeholder="項目名 (例: 楽天カード)" required class="flex-1 px-3 py-2 text-sm border-lg focus:ring-2 focus:ring-rose-200"/><input name="payAmount" type="text" placeholder="請求総額 (数式OK)" class="w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200"/></div>
                             <div class="flex gap-2 bg-gray-50 p-2 rounded-lg">
                                 <select name="payCat" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k,d])=>`<option value="${k}">${d.label}</option>`).join('')}</select>
                                 <select name="payAccountId" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${s.accounts.map(a=>`<option value="${a.id}">${escapeHTML(a.name)}</option>`).join('')}</select>
@@ -915,12 +957,10 @@
                                 const pVar = ((c.variable||0) / totalCat) * 100;
                                 const pInv = ((c.investment||0) / totalCat) * 100;
                                 
-                                barsHTML = `
-                                    ${pInv > 0 ? `<div style="height: ${pInv}%;" class="bg-emerald-400 w-full"></div>` : ''}
-                                    ${pVar > 0 ? `<div style="height: ${pVar}%;" class="bg-rose-400 w-full"></div>` : ''}
-                                    ${pFixed > 0 ? `<div style="height: ${pFixed}%;" class="bg-indigo-400 w-full"></div>` : ''}
-                                    ${pLoan > 0 ? `<div style="height: ${pLoan}%;" class="bg-purple-400 w-full"></div>` : ''}
-                                `;
+                                barsHTML += pInv > 0 ? `<div style="height: ${pInv}%;" class="bg-emerald-400 w-full"></div>` : '';
+                                barsHTML += pVar > 0 ? `<div style="height: ${pVar}%;" class="bg-rose-400 w-full"></div>` : '';
+                                barsHTML += pFixed > 0 ? `<div style="height: ${pFixed}%;" class="bg-indigo-400 w-full"></div>` : '';
+                                barsHTML += pLoan > 0 ? `<div style="height: ${pLoan}%;" class="bg-purple-400 w-full"></div>` : '';
                             }
                         } else {
                             barsHTML = `<div class="w-full h-full bg-rose-400 rounded-t-sm"></div>`;
@@ -936,7 +976,7 @@
                             if (data.catTotals.investment) tooltipHTML += `<p>投資: ${App.formatCurrency(data.catTotals.investment)}</p>`;
                             tooltipHTML += `</div>`;
                         }
-                        tooltipHTML += `<p class="mt-1">月末残高: ${App.formatCurrency(balanceValue)}</p>`;
+                        tooltipHTML += `<p class="mt-1 font-bold">月末残高: ${App.formatCurrency(balanceValue)}</p>`;
 
                         html += `
                             <div class="flex flex-col items-center flex-1 group min-w-[65px]">
@@ -958,13 +998,13 @@
                 // 凡例
                 html += `
                             </div>
-                            <div class="flex justify-center gap-4 mt-6 text-xs text-gray-600 flex-wrap">
-                                <span class="flex items-center gap-1.5"><div class="w-3 h-3 bg-purple-400 rounded-sm"></div>ローン</span>
-                                <span class="flex items-center gap-1.5"><div class="w-3 h-3 bg-indigo-400 rounded-sm"></div>固定費</span>
-                                <span class="flex items-center gap-1.5"><div class="w-3 h-3 bg-rose-400 rounded-sm"></div>変動費(旧仕様分含)</span>
-                                <span class="flex items-center gap-1.5"><div class="w-3 h-3 bg-emerald-400 rounded-sm"></div>投資</span>
-                                <span class="flex items-center gap-1.5 ml-4"><div class="w-3 h-3 bg-emerald-500 rounded-full"></div>月末残高（黒字）</span>
-                                <span class="flex items-center gap-1.5"><div class="w-3 h-3 bg-red-500 rounded-full"></div>月末残高（赤字）</span>
+                            <div class="flex justify-center gap-4 mt-6 text-[10px] sm:text-xs text-gray-600 flex-wrap">
+                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-purple-400 rounded-sm"></div>ローン</span>
+                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-indigo-400 rounded-sm"></div>固定費</span>
+                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-rose-400 rounded-sm"></div>変動費(旧仕様分含)</span>
+                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-emerald-400 rounded-sm"></div>投資</span>
+                                <span class="flex items-center gap-1 ml-4"><div class="w-3 h-3 bg-emerald-500 rounded-full"></div>月末残高（黒字）</span>
+                                <span class="flex items-center gap-1"><div class="w-3 h-3 bg-red-500 rounded-full"></div>月末残高（赤字）</span>
                             </div>
                         </div>
                         
@@ -1154,7 +1194,7 @@
                                 html += `
                                     <div class="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 text-sm shadow-sm ${p.isDone ? 'opacity-40 bg-gray-50' : ''}">
                                         <div>
-                                            <span class="font-bold block mb-1 ${p.isDone ? 'line-through' : ''}">${escapeHTML(p.name)}</span>
+                                            <span class="font-bold block mb-1 ${p.isDone?'line-through':''}">${escapeHTML(p.name)}</span>
                                             <div class="flex gap-2 text-[10px]">${p.dueDate ? `<span class="bg-gray-50 border px-1.5 py-0.5 rounded text-gray-500 flex items-center gap-1">${App.getIconHTML('calendar', 12)}${p.dueDate}日引落</span>` : ''}${p.isDone ? `<span class="bg-rose-100 text-rose-700 font-bold px-1.5 py-0.5 rounded">済</span>` : ''}</div>
                                         </div>
                                         ${App.getDisplayAmountHTML(p.amount, "text-gray-800")}
@@ -1196,7 +1236,7 @@
                             label, 
                             payment: App.totals.totalPaymentsNum, 
                             balance: App.totals.calculatedEndBalance,
-                            catTotals: App.totals.allCatTotals
+                            catTotals: App.totals.allCatTotals // カテゴリごとの内訳を保存
                         };
                         existingHistory.push(autoRecord);
                         existingHistory.sort((a, b) => a.id.localeCompare(b.id));
