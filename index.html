@@ -37,7 +37,6 @@
           font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
           user-select: none;
         }
-        /* ツールチップ用のタップ反応を良くする設定 */
         .group:focus .group-focus\:opacity-100 { opacity: 1; }
     </style>
 </head>
@@ -45,7 +44,7 @@
     <div id="app"></div>
 
     <script>
-        const STORAGE_KEY = 'mpm_vanilla_v4_';
+        const STORAGE_KEY = 'mpm_vanilla_v5_';
 
         const escapeHTML = (str) => {
             return String(str || '')
@@ -74,7 +73,8 @@
             'download': 'download', 'upload': 'upload', 'file-text': 'description', 'check': 'check',
             'plus': 'add', 'trash-2': 'delete', 'pencil': 'edit', 'message-square': 'chat_bubble_outline',
             'done': 'done_all', 'undo': 'undo', 'refresh': 'refresh', 'payments': 'payments',
-            'home': 'home', 'receipt_long': 'receipt_long', 'credit_card': 'credit_card', 'trending_up': 'trending_up'
+            'home': 'home', 'receipt_long': 'receipt_long', 'credit_card': 'credit_card', 'trending_up': 'trending_up',
+            'error_outline': 'error_outline'
         };
 
         const App = {
@@ -83,9 +83,10 @@
                 accounts: [], wallets: [], incomes: [], payments: [], history: [],
                 expandedPayIds: new Set(), editMode: null, historyEditMode: null, deleteTarget: null,
                 selectedAccountPopup: null, preSaveModal: null, showAutoSaveModal: false,
-                confirmImportData: null, showSuccessModal: false,
+                confirmImportData: null, showSuccessModal: false, showBackupErrorModal: false, // エラーモーダル用追加
                 exportData: '', importData: '', importMsg: { text: '', isError: false }, copySuccess: false,
                 saveMonthStr: '', manualHistoryMonth: '',
+                selectedHistoryId: null,
             },
 
             getIconHTML: function(name, size = 24, className = '') {
@@ -136,20 +137,14 @@
             getPreviousMonthStr: function() { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; },
             cleanInput: function(val) { return String(val || '').replace(/,/g, ''); },
 
-            // ★ グラフの目盛りを「綺麗な数字」にするアルゴリズム
             getNiceMax: function(val) {
                 if (val <= 0) return 40000;
                 const pow = Math.pow(10, Math.floor(Math.log10(val)));
                 const frac = val / pow;
                 let niceFrac;
-                if (frac <= 1) niceFrac = 1;       // 例: 100,000
-                else if (frac <= 1.2) niceFrac = 1.2; // 例: 120,000
-                else if (frac <= 1.6) niceFrac = 1.6; // 例: 160,000
-                else if (frac <= 2) niceFrac = 2;     // 例: 200,000
-                else if (frac <= 4) niceFrac = 4;     // 例: 400,000
-                else if (frac <= 6) niceFrac = 6;     // 例: 600,000
-                else if (frac <= 8) niceFrac = 8;     // 例: 800,000
-                else niceFrac = 10;                   // 例: 1,000,000
+                if (frac <= 1) niceFrac = 1; else if (frac <= 1.2) niceFrac = 1.2; else if (frac <= 1.6) niceFrac = 1.6;
+                else if (frac <= 2) niceFrac = 2; else if (frac <= 4) niceFrac = 4; else if (frac <= 6) niceFrac = 6;
+                else if (frac <= 8) niceFrac = 8; else niceFrac = 10;
                 return niceFrac * pow;
             },
 
@@ -167,17 +162,17 @@
             },
 
             loadData: function() {
-                App.state.accounts = App.safeLoadArray([STORAGE_KEY + 'accounts', 'mpm_vanilla_v3_accounts', 'mpm_vanilla_v2_accounts']);
-                App.state.wallets = App.safeLoadArray([STORAGE_KEY + 'wallets', 'mpm_vanilla_v3_wallets', 'mpm_vanilla_v2_wallets']);
-                App.state.incomes = App.safeLoadArray([STORAGE_KEY + 'incomes', 'mpm_vanilla_v3_incomes', 'mpm_vanilla_v2_incomes']);
+                App.state.accounts = App.safeLoadArray([STORAGE_KEY + 'accounts', 'mpm_vanilla_v4_accounts', 'mpm_vanilla_v3_accounts']);
+                App.state.wallets = App.safeLoadArray([STORAGE_KEY + 'wallets', 'mpm_vanilla_v4_wallets', 'mpm_vanilla_v3_wallets']);
+                App.state.incomes = App.safeLoadArray([STORAGE_KEY + 'incomes', 'mpm_vanilla_v4_incomes', 'mpm_vanilla_v3_incomes']);
                 
-                const rawPayments = App.safeLoadArray([STORAGE_KEY + 'payments', 'mpm_vanilla_v3_payments', 'mpm_vanilla_v2_payments']);
+                const rawPayments = App.safeLoadArray([STORAGE_KEY + 'payments', 'mpm_vanilla_v4_payments', 'mpm_vanilla_v3_payments']);
                 App.state.payments = rawPayments.map(p => ({
                     ...p, category: p.category || (p.isFixed ? 'fixed' : 'variable'), 
                     subItems: (Array.isArray(p.subItems) ? p.subItems : []).map(s => ({...s, category: s.category || (s.isFixed ? 'fixed' : 'variable')}))
                 }));
                 
-                App.state.history = App.safeLoadArray([STORAGE_KEY + 'history', 'mpm_vanilla_v3_history', 'mpm_vanilla_v2_history']);
+                App.state.history = App.safeLoadArray([STORAGE_KEY + 'history', 'mpm_vanilla_v4_history', 'mpm_vanilla_v3_history']);
                 App.state.saveMonthStr = App.getCurrentMonthStr();
                 App.state.manualHistoryMonth = App.getPreviousMonthStr();
             },
@@ -253,33 +248,17 @@
 
             setTab: function(tab) { App.state.activeTab = tab; App.render(); },
             setDashTab: function(tab) { App.state.dashTab = tab; App.render(); },
+            selectHistory: function(id) {
+                if (App.state.historyEditMode) return;
+                App.state.selectedHistoryId = App.state.selectedHistoryId === id ? null : id;
+                App.render();
+            },
             
-            addAccount: function(e, form) {
-                e.preventDefault();
-                App.state.accounts.push({ id: Date.now(), name: form.accName.value, amount: App.cleanInput(form.accAmount.value), incomingAmount: App.cleanInput(form.accIncoming.value), isIncomingDone: false, memo: form.accMemo.value });
-                App.saveData(); App.render();
-            },
-            addWallet: function(e, form) {
-                e.preventDefault();
-                App.state.wallets.push({ id: Date.now(), name: form.walName.value, amount: App.cleanInput(form.walAmount.value), outgoAmount: App.cleanInput(form.walOutgo.value), isOutgoDone: false, isOutgoFixed: form.walIsFixed.checked, memo: form.walMemo.value });
-                App.saveData(); App.render();
-            },
-            addIncome: function(e, form) {
-                e.preventDefault();
-                App.state.incomes.push({ id: Date.now(), name: form.incName.value, amount: App.cleanInput(form.incAmount.value), isFixed: form.incIsFixed.checked, isDone: false, memo: form.incMemo.value });
-                App.saveData(); App.render();
-            },
-            addPayment: function(e, form) {
-                e.preventDefault();
-                App.state.payments.push({ id: Date.now(), name: form.payName.value, amount: App.cleanInput(form.payAmount.value), dueDate: form.payDueDate.value ? Number(form.payDueDate.value) : null, accountId: form.payAccountId.value ? Number(form.payAccountId.value) : '', category: form.payCat.value, isDone: false, memo: form.payMemo.value, subItems: [] });
-                App.saveData(); App.render();
-            },
-            addSubItem: function(e, form, paymentId) {
-                e.preventDefault();
-                const newItem = { id: Date.now(), name: form.subName.value, amount: App.cleanInput(form.subAmount.value), category: form.subCat.value, endDate: form.subEndDate ? form.subEndDate.value : '', memo: form.subMemo.value };
-                App.state.payments = App.state.payments.map(p => p.id === paymentId ? { ...p, subItems: [...(p.subItems||[]), newItem] } : p);
-                App.saveData(); App.render();
-            },
+            addAccount: function(e, form) { e.preventDefault(); App.state.accounts.push({ id: Date.now(), name: form.accName.value, amount: App.cleanInput(form.accAmount.value), incomingAmount: App.cleanInput(form.accIncoming.value), isIncomingDone: false, memo: form.accMemo.value }); App.saveData(); App.render(); },
+            addWallet: function(e, form) { e.preventDefault(); App.state.wallets.push({ id: Date.now(), name: form.walName.value, amount: App.cleanInput(form.walAmount.value), outgoAmount: App.cleanInput(form.walOutgo.value), isOutgoDone: false, isOutgoFixed: form.walIsFixed.checked, memo: form.walMemo.value }); App.saveData(); App.render(); },
+            addIncome: function(e, form) { e.preventDefault(); App.state.incomes.push({ id: Date.now(), name: form.incName.value, amount: App.cleanInput(form.incAmount.value), isFixed: form.incIsFixed.checked, isDone: false, memo: form.incMemo.value }); App.saveData(); App.render(); },
+            addPayment: function(e, form) { e.preventDefault(); App.state.payments.push({ id: Date.now(), name: form.payName.value, amount: App.cleanInput(form.payAmount.value), dueDate: form.payDueDate.value ? Number(form.payDueDate.value) : null, accountId: form.payAccountId.value ? Number(form.payAccountId.value) : '', category: form.payCat.value, isDone: false, memo: form.payMemo.value, subItems: [] }); App.saveData(); App.render(); },
+            addSubItem: function(e, form, paymentId) { e.preventDefault(); const newItem = { id: Date.now(), name: form.subName.value, amount: App.cleanInput(form.subAmount.value), category: form.subCat.value, endDate: form.subEndDate ? form.subEndDate.value : '', memo: form.subMemo.value }; App.state.payments = App.state.payments.map(p => p.id === paymentId ? { ...p, subItems: [...(p.subItems||[]), newItem] } : p); App.saveData(); App.render(); },
 
             toggleDone: function(type, id, e) {
                 if (e) e.stopPropagation();
@@ -289,29 +268,24 @@
                 if (type === 'payment') App.state.payments = App.state.payments.map(p => p.id === id ? { ...p, isDone: !p.isDone } : p);
                 App.saveData(); App.render();
             },
-            toggleExpand: function(id, e) {
-                if (e) e.stopPropagation();
-                if (App.state.expandedPayIds.has(id)) App.state.expandedPayIds.delete(id);
-                else App.state.expandedPayIds.add(id);
-                App.render();
-            },
-            moveItem: function(type, index, direction, e) {
-                if (e) e.stopPropagation();
-                let list = App.state[type + 's'];
-                const newIndex = index + direction;
-                if (newIndex < 0 || newIndex >= list.length) return;
-                [list[index], list[newIndex]] = [list[newIndex], list[index]];
-                App.saveData(); App.render();
-            },
+            toggleExpand: function(id, e) { if (e) e.stopPropagation(); if (App.state.expandedPayIds.has(id)) App.state.expandedPayIds.delete(id); else App.state.expandedPayIds.add(id); App.render(); },
+            moveItem: function(type, index, direction, e) { if (e) e.stopPropagation(); let list = App.state[type + 's']; const newIndex = index + direction; if (newIndex < 0 || newIndex >= list.length) return; [list[index], list[newIndex]] = [list[newIndex], list[index]]; App.saveData(); App.render(); },
             requestDelete: function(type, id, name, e) { if (e) e.stopPropagation(); App.state.deleteTarget = { type, id, name }; App.render(); },
             executeDelete: function() {
                 const t = App.state.deleteTarget; if (!t) return;
                 if (t.type === 'account') { App.state.accounts = App.state.accounts.filter(item => item.id !== t.id); App.state.payments = App.state.payments.map(p => p.accountId === t.id ? { ...p, accountId: '' } : p); } 
                 else if (t.type === 'subItem') { App.state.payments = App.state.payments.map(p => ({ ...p, subItems: (p.subItems||[]).filter(s => s.id !== t.id) })); } 
+                else if (t.type === 'history') { App.state.history = App.state.history.filter(item => item.id !== t.id); App.state.selectedHistoryId = null; App.state.historyEditMode = null; }
                 else { App.state[t.type + 's'] = App.state[t.type + 's'].filter(item => item.id !== t.id); }
                 App.state.deleteTarget = null; App.saveData(); App.render();
             },
-            closeModal: function(modalName) { App.state[modalName] = null; if (modalName === 'showAutoSaveModal') App.state.showAutoSaveModal = false; if (modalName === 'showSuccessModal') App.state.showSuccessModal = false; App.render(); },
+            closeModal: function(modalName) { 
+                App.state[modalName] = null; 
+                if (modalName === 'showAutoSaveModal') App.state.showAutoSaveModal = false; 
+                if (modalName === 'showSuccessModal') App.state.showSuccessModal = false; 
+                if (modalName === 'showBackupErrorModal') App.state.showBackupErrorModal = false;
+                App.render(); 
+            },
             openAccountPopup: function(id) { App.state.selectedAccountPopup = id; App.render(); },
 
             startEdit: function(type, id, e) { if (e) e.stopPropagation(); App.state.editMode = { type, id }; App.render(); },
@@ -338,6 +312,35 @@
                 }
             },
 
+            // --- ★ 月初の自動保存完了アクション（ここでバックアップファイルを出力） ---
+            handleAutoSaveConfirm: function() {
+                App.closeModal('showAutoSaveModal');
+                // モーダルを閉じた直後に、自動名でのバックアップ生成を強制トリガー
+                App.executeAutoBackup();
+            },
+
+            // --- 自動バックアップ生成処理 ---
+            executeAutoBackup: function() {
+                try {
+                    const text = App.generateExportText();
+                    const blob = new Blob([text], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    // 自動保存時は固定の名前「資産管理.txt」にする
+                    a.download = '資産管理.txt';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } catch (e) {
+                    console.error("Auto backup failed:", e);
+                    // エラーになった場合は専用の警告モーダルを表示
+                    App.state.showBackupErrorModal = true;
+                    App.render();
+                }
+            },
+
             triggerSaveHistory: function() {
                 const monthStr = document.getElementById('manualHistoryMonth').value;
                 if (!monthStr) return;
@@ -359,9 +362,10 @@
             },
             startHistoryEdit: function(id) { App.state.historyEditMode = id; App.render(); },
             cancelHistoryEdit: function() { App.state.historyEditMode = null; App.render(); },
-            saveHistoryEdit: function(id) {
-                const payment = Number(document.getElementById(`edit-hist-${id}-payment`).value) || 0;
-                const balance = Number(document.getElementById(`edit-hist-${id}-balance`).value) || 0;
+            saveHistoryEdit: function(e, id) {
+                e.preventDefault();
+                const payment = Number(document.getElementById(`edit-hist-payment`).value) || 0;
+                const balance = Number(document.getElementById(`edit-hist-balance`).value) || 0;
                 App.state.history = App.state.history.map(h => h.id === id ? { ...h, payment, balance, catTotals: null } : h);
                 App.state.historyEditMode = null; App.saveData(); App.render();
             },
@@ -380,12 +384,11 @@
                     if (p.subItems && p.subItems.length > 0) p.subItems.forEach(s => { txt += `>${s.id},${s.name},${s.amount||0},${s.category||'variable'},${s.endDate||''},${App.safeMemo(s.memo)}\n`; });
                 });
                 txt += "\n【履歴】\n";
-                App.state.history.forEach(h => {
-                    txt += `${h.id},${h.label},${h.payment},${h.balance},${h.catTotals?.loan||0},${h.catTotals?.fixed||0},${h.catTotals?.variable||0},${h.catTotals?.investment||0}\n`;
-                });
+                App.state.history.forEach(h => { txt += `${h.id},${h.label},${h.payment},${h.balance},${h.catTotals?.loan||0},${h.catTotals?.fixed||0},${h.catTotals?.variable||0},${h.catTotals?.investment||0}\n`; });
                 return txt;
             },
             handleGenerateExport: function() { try { App.state.exportData = App.generateExportText(); App.state.copySuccess = false; App.state.importMsg = { text: '', isError: false }; App.render(); } catch (e) { App.state.importMsg = { text: '出力エラー', isError: true }; App.render(); } },
+            // 手動バックアップ用（日付がつく）
             handleDownloadExport: function() {
                 try {
                     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([App.generateExportText()], { type: 'text/plain' }));
@@ -412,52 +415,21 @@
                     for(let i=0; i<lines.length; i++) {
                         let line = lines[i].trim(); if (!line || line.startsWith('---')) continue; if (line.startsWith('【')) { mode = line; continue; }
                         const pts = line.split(',');
-                        if (mode === '【口座】' && pts.length >= 3) {
-                            let incAmt = ''; let isIncDone = false; let memo = '';
-                            if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { incAmt = pts[3]; memo = pts[4]; } else if (pts.length >= 6) { incAmt = pts[3]; isIncDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
-                            nA.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], incomingAmount: incAmt, isIncomingDone: isIncDone, memo: memo });
-                        }
-                        else if (mode === '【手元現金】' && pts.length >= 3) {
-                            nW.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], outgoAmount: pts[3] || '', isOutgoDone: pts[4] === '1', isOutgoFixed: pts[5] === '1', memo: pts.slice(6).join(',') });
-                        }
-                        else if (mode === '【入金】' && pts.length >= 3) {
-                            let isFixed = false; let isDone = false; let memo = '';
-                            if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { isFixed = pts[3] === '1'; memo = pts[4]; } else if (pts.length >= 6) { isFixed = pts[3] === '1'; isDone = pts[4] === '1'; memo = pts.slice(5).join(','); }
-                            nI.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], isFixed: isFixed, isDone: isDone, memo: memo });
-                        }
+                        if (mode === '【口座】' && pts.length >= 3) { let incAmt = ''; let isIncDone = false; let memo = ''; if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { incAmt = pts[3]; memo = pts[4]; } else if (pts.length >= 6) { incAmt = pts[3]; isIncDone = pts[4] === '1'; memo = pts.slice(5).join(','); } nA.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], incomingAmount: incAmt, isIncomingDone: isIncDone, memo: memo }); }
+                        else if (mode === '【手元現金】' && pts.length >= 3) { nW.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], outgoAmount: pts[3] || '', isOutgoDone: pts[4] === '1', isOutgoFixed: pts[5] === '1', memo: pts.slice(6).join(',') }); }
+                        else if (mode === '【入金】' && pts.length >= 3) { let isFixed = false; let isDone = false; let memo = ''; if (pts.length === 4) { memo = pts[3]; } else if (pts.length === 5) { isFixed = pts[3] === '1'; memo = pts[4]; } else if (pts.length >= 6) { isFixed = pts[3] === '1'; isDone = pts[4] === '1'; memo = pts.slice(5).join(','); } nI.push({ id: Number(pts[0]), name: pts[1], amount: pts[2], isFixed: isFixed, isDone: isDone, memo: memo }); }
                         else if (mode === '【支払い】') {
-                            if (line.startsWith('>') && currP && pts.length >= 4) {
-                                let cat = 'variable'; let endDate = ''; let memo = '';
-                                if (pts.length === 6) { cat = (pts[3] === '1' || pts[3] === '0') ? (pts[3]==='1'?'fixed':'variable') : pts[3]; endDate = pts[4]; memo = pts[5]; } 
-                                else if (pts.length >= 7) { cat = (pts[3] === '1' || pts[3] === '0') ? (pts[3]==='1'?'fixed':'variable') : pts[3]; endDate = pts[4]; memo = pts.slice(5).join(','); }
-                                currP.subItems.push({ id: Number(pts[0].substring(1)), name: pts[1], amount: pts[2], category: cat, endDate: endDate, memo: memo });
-                            }
-                            else if (pts.length >= 3) {
-                                let dueDate = pts[3] ? Number(pts[3]) : null; let accountId = pts[4] ? Number(pts[4]) : ''; let cat = 'variable'; let isDone = false; let memo = '';
-                                if (pts.length === 6) { memo = pts[5]; } else if (pts.length === 7) { cat = pts[5] === '1' ? 'fixed' : 'variable'; memo = pts[6]; } else if (pts.length >= 8) { cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5]; isDone = pts[6] === '1'; memo = pts.slice(7).join(','); }
-                                currP = { id: Number(pts[0]), name: pts[1], amount: pts[2], dueDate: dueDate, accountId: accountId, category: cat, isDone: isDone, memo: memo, subItems: [] };
-                                nP.push(currP);
-                            }
+                            if (line.startsWith('>') && currP && pts.length >= 4) { let cat = 'variable'; let endDate = ''; let memo = ''; if (pts.length === 6) { cat = (pts[3] === '1' || pts[3] === '0') ? (pts[3]==='1'?'fixed':'variable') : pts[3]; endDate = pts[4]; memo = pts[5]; } else if (pts.length >= 7) { cat = (pts[3] === '1' || pts[3] === '0') ? (pts[3]==='1'?'fixed':'variable') : pts[3]; endDate = pts[4]; memo = pts.slice(5).join(','); } currP.subItems.push({ id: Number(pts[0].substring(1)), name: pts[1], amount: pts[2], category: cat, endDate: endDate, memo: memo }); }
+                            else if (pts.length >= 3) { let dueDate = pts[3] ? Number(pts[3]) : null; let accountId = pts[4] ? Number(pts[4]) : ''; let cat = 'variable'; let isDone = false; let memo = ''; if (pts.length === 6) { memo = pts[5]; } else if (pts.length === 7) { cat = pts[5] === '1' ? 'fixed' : 'variable'; memo = pts[6]; } else if (pts.length >= 8) { cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5]; isDone = pts[6] === '1'; memo = pts.slice(7).join(','); } currP = { id: Number(pts[0]), name: pts[1], amount: pts[2], dueDate: dueDate, accountId: accountId, category: cat, isDone: isDone, memo: memo, subItems: [] }; nP.push(currP); }
                         } else if (mode === '【履歴】' && pts.length >= 4) {
-                            let catTotals = null;
-                            if (pts.length >= 8) {
-                                catTotals = { loan: Number(pts[4])||0, fixed: Number(pts[5])||0, variable: Number(pts[6])||0, investment: Number(pts[7])||0 };
-                                if (catTotals.loan === 0 && catTotals.fixed === 0 && catTotals.variable === 0 && catTotals.investment === 0) catTotals = null;
-                            }
+                            let catTotals = null; if (pts.length >= 8) { catTotals = { loan: Number(pts[4])||0, fixed: Number(pts[5])||0, variable: Number(pts[6])||0, investment: Number(pts[7])||0 }; if (catTotals.loan === 0 && catTotals.fixed === 0 && catTotals.variable === 0 && catTotals.investment === 0) catTotals = null; }
                             nH.push({ id: pts[0], label: pts[1], payment: Number(pts[2]), balance: Number(pts[3]), catTotals });
                         }
                     }
-                    App.state.confirmImportData = { accounts: nA, wallets: nW, incomes: nI, payments: nP, history: nH };
-                    App.state.importMsg = { text: '', isError: false };
-                    App.render();
+                    App.state.confirmImportData = { accounts: nA, wallets: nW, incomes: nI, payments: nP, history: nH }; App.state.importMsg = { text: '', isError: false }; App.render();
                 } catch (e) { App.state.importMsg = { text: 'データの解析に失敗しました。ファイルが正しくない可能性があります。', isError: true }; App.render(); }
             },
-            executeImport: function() {
-                const data = App.state.confirmImportData; if (!data) return;
-                App.state.accounts = data.accounts; App.state.wallets = data.wallets; App.state.incomes = data.incomes; App.state.payments = data.payments; App.state.history = data.history;
-                App.state.importData = ''; App.state.confirmImportData = null; App.state.showSuccessModal = true;
-                App.saveData(); App.render();
-            },
+            executeImport: function() { const data = App.state.confirmImportData; if (!data) return; App.state.accounts = data.accounts; App.state.wallets = data.wallets; App.state.incomes = data.incomes; App.state.payments = data.payments; App.state.history = data.history; App.state.importData = ''; App.state.confirmImportData = null; App.state.showSuccessModal = true; App.saveData(); App.render(); },
 
             renderSortButtons: function(type, index, isFirst, isLast) {
                 return `
@@ -467,15 +439,9 @@
                     </div>
                 `;
             },
-            renderCategorySelect: function(name, val) {
-                return `<select name="${name}" class="w-24 px-1 py-1 text-xs border rounded">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`;
-            },
-            renderCategorySelectLg: function(name, val) {
-                return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`;
-            },
-            renderAccountSelect: function(name, val) {
-                return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}</select>`;
-            },
+            renderCategorySelect: function(name, val) { return `<select name="${name}" class="w-24 px-1 py-1 text-xs border rounded">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`; },
+            renderCategorySelectLg: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`; },
+            renderAccountSelect: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}</select>`; },
 
             render: function() {
                 App.calculateTotals();
@@ -527,7 +493,6 @@
                 const s = App.state;
                 let html = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">`;
                 
-                // 口座セクション
                 html += `
                     <div class="rounded-2xl p-5 shadow-sm border bg-blue-50/50 border-blue-100">
                         <div class="flex items-center justify-between mb-4">
@@ -559,28 +524,15 @@
                                     <div class="flex justify-between items-start mb-1">
                                         <span class="font-bold text-gray-800">${escapeHTML(item.name)}</span>
                                         <div class="flex gap-1 shrink-0">
-                                            ${App.calcAmount(item.incomingAmount) > 0 ? `
-                                                <button type="button" onclick="App.toggleDone('account', ${item.id}, event)" class="text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isIncomingDone ? 'bg-emerald-100 text-emerald-800' : 'text-gray-500'}">
-                                                    ${App.getIconHTML(item.isIncomingDone ? 'check' : 'done', 12)} 入金${item.isIncomingDone ? '済' : '予定'}
-                                                </button>
-                                            ` : ''}
+                                            ${App.calcAmount(item.incomingAmount) > 0 ? `<button type="button" onclick="App.toggleDone('account', ${item.id}, event)" class="text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isIncomingDone ? 'bg-emerald-100 text-emerald-800' : 'text-gray-500'}">${App.getIconHTML(item.isIncomingDone ? 'check' : 'done', 12)} 入金${item.isIncomingDone ? '済' : '予定'}</button>` : ''}
                                             <button type="button" onclick="App.startEdit('account', ${item.id}, event)" class="text-gray-400 hover:text-blue-500 p-0.5">${App.getIconHTML('pencil', 16)}</button>
                                             <button type="button" onclick="App.requestDelete('account', ${item.id}, '${escapeHTML(item.name)}', event)" class="text-gray-400 hover:text-red-500 p-0.5">${App.getIconHTML('trash-2', 16)}</button>
                                         </div>
                                     </div>
                                     ${item.memo ? `<div class="text-[10px] text-gray-400 mb-2 truncate">${App.getIconHTML('message-square', 10)} ${escapeHTML(item.memo)}</div>` : ''}
                                     <div class="flex justify-between items-end gap-2">
-                                        <div class="flex-1">
-                                            <span class="text-[10px] text-gray-500 block">残高</span>
-                                            ${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}
-                                            ${App.calcAmount(item.incomingAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isIncomingDone ? 'text-gray-400 line-through font-normal' : 'text-emerald-600'}">+${App.getDisplayAmountHTML(item.incomingAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}
-                                        </div>
-                                        ${(activeOut > 0 || incAmt > 0) ? `
-                                            <div class="flex-1 text-right pl-2 border-l border-gray-100">
-                                                <span class="text-[10px] text-gray-500 block">引落後予想</span>
-                                                <span class="font-bold text-sm ${isShort ? 'text-red-600' : 'text-emerald-600'}">${App.formatCurrency(expectedBal)}</span>
-                                            </div>
-                                        ` : ''}
+                                        <div class="flex-1"><span class="text-[10px] text-gray-500 block">残高</span>${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}${App.calcAmount(item.incomingAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isIncomingDone ? 'text-gray-400 line-through font-normal' : 'text-emerald-600'}">+${App.getDisplayAmountHTML(item.incomingAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}</div>
+                                        ${(activeOut > 0 || incAmt > 0) ? `<div class="flex-1 text-right pl-2 border-l border-gray-100"><span class="text-[10px] text-gray-500 block">引落後予想</span><span class="font-bold text-sm ${isShort ? 'text-red-600' : 'text-emerald-600'}">${App.formatCurrency(expectedBal)}</span></div>` : ''}
                                     </div>
                                 </div>
                             </div>
@@ -596,7 +548,6 @@
                     </div>
                 `;
 
-                // 手元現金セクション
                 html += `
                     <div class="rounded-2xl p-5 shadow-sm border bg-amber-50/50 border-amber-100">
                         <div class="flex items-center justify-between mb-4">
@@ -624,28 +575,15 @@
                                     <div class="flex justify-between items-start mb-1">
                                         <span class="font-bold text-gray-800">${escapeHTML(item.name)}</span>
                                         <div class="flex gap-1 shrink-0">
-                                            ${App.calcAmount(item.outgoAmount) > 0 ? `
-                                                <button type="button" onclick="App.toggleDone('wallet', ${item.id}, event)" class="text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isOutgoDone ? 'bg-amber-100 text-amber-800' : 'text-gray-500'}">
-                                                    ${App.getIconHTML(item.isOutgoDone ? 'check' : 'done', 12)} 消費${item.isOutgoDone ? '済' : '予定'}
-                                                </button>
-                                            ` : ''}
+                                            ${App.calcAmount(item.outgoAmount) > 0 ? `<button type="button" onclick="App.toggleDone('wallet', ${item.id}, event)" class="text-[10px] px-1.5 py-0.5 rounded border font-bold flex items-center ${item.isOutgoDone ? 'bg-amber-100 text-amber-800' : 'text-gray-500'}">${App.getIconHTML(item.isOutgoDone ? 'check' : 'done', 12)} 消費${item.isOutgoDone ? '済' : '予定'}</button>` : ''}
                                             <button type="button" onclick="App.startEdit('wallet', ${item.id}, event)" class="text-gray-400 hover:text-amber-500 p-0.5">${App.getIconHTML('pencil', 16)}</button>
                                             <button type="button" onclick="App.requestDelete('wallet', ${item.id}, '${escapeHTML(item.name)}', event)" class="text-gray-400 hover:text-red-500 p-0.5">${App.getIconHTML('trash-2', 16)}</button>
                                         </div>
                                     </div>
                                     ${item.memo ? `<div class="text-[10px] text-gray-400 mb-2 truncate">${App.getIconHTML('message-square', 10)} ${escapeHTML(item.memo)}</div>` : ''}
                                     <div class="flex justify-between items-end gap-2">
-                                        <div class="flex-1">
-                                            <span class="text-[10px] text-gray-500 block">残高</span>
-                                            ${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}
-                                            ${App.calcAmount(item.outgoAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isOutgoDone ? 'text-gray-400 line-through font-normal' : 'text-rose-600'}">-${App.getDisplayAmountHTML(item.outgoAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}
-                                        </div>
-                                        ${activeOut > 0 ? `
-                                            <div class="flex-1 text-right pl-2 border-l border-gray-100">
-                                                <span class="text-[10px] text-gray-500 block">消費後予想</span>
-                                                <span class="font-bold text-sm ${expectedBal < 0 ? 'text-red-600' : 'text-amber-600'}">${App.formatCurrency(expectedBal)}</span>
-                                            </div>
-                                        ` : ''}
+                                        <div class="flex-1"><span class="text-[10px] text-gray-500 block">残高</span>${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}${App.calcAmount(item.outgoAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isOutgoDone ? 'text-gray-400 line-through font-normal' : 'text-rose-600'}">-${App.getDisplayAmountHTML(item.outgoAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}</div>
+                                        ${activeOut > 0 ? `<div class="flex-1 text-right pl-2 border-l border-gray-100"><span class="text-[10px] text-gray-500 block">消費後予想</span><span class="font-bold text-sm ${expectedBal < 0 ? 'text-red-600' : 'text-amber-600'}">${App.formatCurrency(expectedBal)}</span></div>` : ''}
                                     </div>
                                 </div>
                             </div>
@@ -722,7 +660,6 @@
                 const s = App.state;
                 let html = `<div class="animate-fade-in max-w-4xl mx-auto space-y-4">`;
                 
-                // カテゴリ別集計
                 html += `<div class="grid grid-cols-2 md:grid-cols-4 gap-3">`;
                 Object.entries(CAT_LABELS).forEach(([key, data]) => {
                     html += `
@@ -897,7 +834,7 @@
                     <div class="space-y-6 animate-fade-in">
                         <div class="bg-white rounded-2xl p-6 shadow-md border border-gray-100">
                             <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 pb-4 border-b border-gray-100">
-                                <div><h2 class="text-xl font-bold text-gray-800">月次推移グラフ</h2><p class="text-sm text-gray-500">毎月の支払い実績と、月末残高（緑の横線）の推移です。棒をタップすると内訳が表示されます。</p></div>
+                                <div><h2 class="text-xl font-bold text-gray-800">月次推移グラフ</h2><p class="text-sm text-gray-500">毎月の支払い実績と、月末残高（緑の横線）の推移です。棒をタップすると下に詳細が表示されます。</p></div>
                                 <div class="flex flex-wrap items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100 w-full lg:w-auto">
                                     <div class="text-xs font-bold text-indigo-900 block w-full mb-1">💡 現在の状況を過去の月末残高として保存する</div>
                                     <input type="month" id="manualHistoryMonth" value="${App.state.manualHistoryMonth}" onchange="App.state.manualHistoryMonth = this.value" class="text-sm px-2 py-1.5 border rounded bg-white" />
@@ -913,33 +850,29 @@
                     const maxVal = App.getNiceMax(rawMax);
                     const yAxisValues = [1, 0.75, 0.5, 0.25, 0].map(ratio => maxVal * ratio);
                     
-                    html += `<div class="relative h-[380px] mt-6 flex">`;
+                    html += `<div class="relative h-[250px] mt-6 flex">`;
                     
-                    // Y軸目盛り（綺麗な数字）
                     html += `
-                        <div class="w-16 shrink-0 flex flex-col justify-between items-end pr-2 pb-8 pt-20 text-[10px] text-gray-400 font-mono z-10 bg-white border-r border-gray-100">
+                        <div class="w-16 shrink-0 flex flex-col justify-between items-end pr-2 pb-8 text-[10px] text-gray-400 font-mono z-10 bg-white border-r border-gray-100">
                             ${yAxisValues.map(val => `<span>${val === 0 ? '0' : App.formatCurrency(val).replace('￥', '¥').replace('.00', '')}</span>`).join('')}
                         </div>
                     `;
 
-                    // グラフエリア
                     html += `
                         <div class="flex-1 overflow-x-auto hide-scrollbar relative border-b-2 border-gray-200 pb-8">
-                            <!-- 背景の点線ガイド -->
-                            <div class="absolute inset-0 flex flex-col justify-between pointer-events-none z-0 pb-8 pt-20 px-2 min-w-full">
+                            <div class="absolute inset-0 flex flex-col justify-between pointer-events-none z-0 pb-8 px-2 min-w-full">
                                 ${[1, 2, 3, 4, 5].map(() => `<div class="w-full border-t border-gray-200 border-dashed"></div>`).join('')}
                             </div>
-                            
-                            <div class="flex items-end justify-around gap-6 h-full px-4 min-w-max relative z-10 pt-20">
+                            <div class="flex items-end justify-around gap-6 h-full px-4 min-w-max relative z-10">
                     `;
                     
                     App.state.history.forEach(data => {
+                        const isSelected = App.state.selectedHistoryId === data.id;
                         const paymentValue = Number(data.payment) || 0;
                         const balanceValue = Number(data.balance) || 0;
                         const paymentHeight = (paymentValue / maxVal) * 100;
                         const isShort = balanceValue < 0;
                         
-                        // カテゴリ別積み上げ棒
                         let barsHTML = '';
                         if (data.catTotals && paymentValue > 0) {
                             const c = data.catTotals;
@@ -948,11 +881,7 @@
                             if (totalCat === 0) {
                                 barsHTML = `<div class="w-full h-full bg-rose-400 rounded-t-sm"></div>`;
                             } else {
-                                const pLoan = ((c.loan||0) / totalCat) * 100;
-                                const pFixed = ((c.fixed||0) / totalCat) * 100;
-                                const pVar = ((c.variable||0) / totalCat) * 100;
-                                const pInv = ((c.investment||0) / totalCat) * 100;
-                                
+                                const pLoan = ((c.loan||0) / totalCat) * 100; const pFixed = ((c.fixed||0) / totalCat) * 100; const pVar = ((c.variable||0) / totalCat) * 100; const pInv = ((c.investment||0) / totalCat) * 100;
                                 barsHTML += pInv > 0 ? `<div style="height: ${pInv}%;" class="bg-emerald-400 w-full"></div>` : '';
                                 barsHTML += pVar > 0 ? `<div style="height: ${pVar}%;" class="bg-rose-400 w-full"></div>` : '';
                                 barsHTML += pFixed > 0 ? `<div style="height: ${pFixed}%;" class="bg-indigo-400 w-full"></div>` : '';
@@ -962,32 +891,15 @@
                             barsHTML = `<div class="w-full h-full bg-rose-400 rounded-t-sm"></div>`;
                         }
 
-                        // ツールチップ詳細
-                        let tooltipHTML = `<p class="border-b border-gray-600 pb-1 mb-1">発生総支払: ${App.formatCurrency(paymentValue)}</p>`;
-                        if (data.catTotals) {
-                            tooltipHTML += `<div class="text-[10px] text-gray-300 space-y-0.5">`;
-                            if (data.catTotals.loan) tooltipHTML += `<p class="flex items-center gap-1"><span class="w-2 h-2 bg-purple-400 rounded-full"></span>ローン: ${App.formatCurrency(data.catTotals.loan)}</p>`;
-                            if (data.catTotals.fixed) tooltipHTML += `<p class="flex items-center gap-1"><span class="w-2 h-2 bg-indigo-400 rounded-full"></span>固定費: ${App.formatCurrency(data.catTotals.fixed)}</p>`;
-                            if (data.catTotals.variable) tooltipHTML += `<p class="flex items-center gap-1"><span class="w-2 h-2 bg-rose-400 rounded-full"></span>変動費: ${App.formatCurrency(data.catTotals.variable)}</p>`;
-                            if (data.catTotals.investment) tooltipHTML += `<p class="flex items-center gap-1"><span class="w-2 h-2 bg-emerald-400 rounded-full"></span>投資: ${App.formatCurrency(data.catTotals.investment)}</p>`;
-                            tooltipHTML += `</div>`;
-                        }
-                        tooltipHTML += `<p class="mt-1.5 pt-1 border-t border-gray-600 font-bold text-emerald-300">月末残高: ${App.formatCurrency(balanceValue)}</p>`;
-
                         html += `
-                                <div class="flex flex-col items-center group w-10 shrink-0 h-full relative" tabindex="0">
-                                    <div class="opacity-0 group-focus:opacity-100 md:group-hover:opacity-100 transition-opacity absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs p-3 rounded-xl pointer-events-none z-50 whitespace-nowrap shadow-xl">
-                                        <div class="absolute -bottom-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 bg-gray-800 rotate-45"></div>
-                                        <div class="relative z-10">${tooltipHTML}</div>
-                                    </div>
-                                    <div class="w-full h-full flex justify-center items-end relative">
+                                <div class="flex flex-col items-center group w-10 shrink-0 h-full relative cursor-pointer" onclick="App.selectHistory('${data.id}')">
+                                    <div class="w-full h-full flex justify-center items-end relative transition-all duration-300 ${isSelected ? 'opacity-100 drop-shadow-md scale-105' : (App.state.selectedHistoryId ? 'opacity-40 grayscale-[50%]' : 'opacity-100 hover:opacity-80')}">
                                         <div class="w-full max-w-[32px] flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden z-10" style="height: ${paymentHeight}%;">
                                             ${barsHTML}
                                         </div>
-                                        <!-- 月末残高の横線マーカー -->
-                                        <div class="absolute w-[160%] h-1 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -1)}%;"></div>
+                                        <div class="absolute w-[160%] h-1.5 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -2)}%;"></div>
                                     </div>
-                                    <span class="text-xs text-gray-500 mt-2 font-bold whitespace-nowrap absolute -bottom-6">${escapeHTML(data.label)}</span>
+                                    <span class="text-xs ${isSelected ? 'text-indigo-600 font-black' : 'text-gray-500 font-bold'} mt-2 whitespace-nowrap absolute -bottom-6">${escapeHTML(data.label)}</span>
                                 </div>
                         `;
                     });
@@ -1009,43 +921,90 @@
                                 <span class="flex items-center gap-1"><div class="w-4 h-1.5 bg-red-500 rounded-full"></div>月末残高（赤字）</span>
                             </div>
                         </div>
-                        
-                        <div class="bg-white rounded-2xl p-6 shadow-md border border-gray-100">
-                            <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">${App.getIconHTML('pencil', 20, 'text-gray-500')} 履歴データの編集・修正（手入力）</h3>
                 `;
-                if (App.state.history.length > 0) {
-                    html += `
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-sm text-left text-gray-500">
-                                <thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-4 py-3">対象月</th><th class="px-4 py-3">支払い合計額</th><th class="px-4 py-3">月末残高</th><th class="px-4 py-3 text-right">操作</th></tr></thead>
-                                <tbody>
-                    `;
-                    App.state.history.forEach(h => {
-                        if (App.state.historyEditMode === h.id) {
+
+                if (App.state.selectedHistoryId) {
+                    const sel = App.state.history.find(h => h.id === App.state.selectedHistoryId);
+                    if (sel) {
+                        html += `<div class="bg-white rounded-2xl p-6 shadow-lg border border-indigo-200 animate-fade-in mt-6">`;
+                        
+                        if (App.state.historyEditMode === sel.id) {
                             html += `
-                                <tr class="bg-indigo-50 border-b">
-                                    <td class="px-4 py-3 font-bold text-gray-900">${escapeHTML(h.label)}</td>
-                                    <td class="px-4 py-3"><input type="number" id="edit-hist-${h.id}-payment" value="${h.payment}" class="w-full px-2 py-1 border rounded bg-white text-sm" /></td>
-                                    <td class="px-4 py-3"><input type="number" id="edit-hist-${h.id}-balance" value="${h.balance}" class="w-full px-2 py-1 border rounded bg-white text-sm" /></td>
-                                    <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap"><button onclick="App.cancelHistoryEdit()" class="px-2.5 py-1 text-xs font-bold bg-white text-gray-600 rounded border hover:bg-gray-50">消去</button><button onclick="App.saveHistoryEdit('${h.id}')" class="px-2.5 py-1 text-xs font-bold bg-indigo-600 text-white rounded hover:bg-indigo-700">保存</button></td>
-                                </tr>
+                                <div class="flex items-center justify-between mb-4 border-b pb-3">
+                                    <h3 class="text-lg font-black text-indigo-800">${escapeHTML(sel.label)} のデータを修正</h3>
+                                    <button onclick="App.cancelHistoryEdit()" class="text-gray-400 hover:text-gray-700">${App.getIconHTML('x', 24)}</button>
+                                </div>
+                                <form onsubmit="App.saveHistoryEdit(event, '${sel.id}')" class="space-y-4">
+                                    <div class="bg-rose-50 p-4 rounded-xl border border-rose-100">
+                                        <label class="text-sm font-bold text-rose-800 block mb-1">発生総支払 (円)</label>
+                                        <input type="number" id="edit-hist-payment" value="${sel.payment}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-rose-300 bg-white" required />
+                                        <p class="text-xs text-rose-500 mt-1">※手動で修正すると、内訳（ローンや固定費の比率）のデータはクリアされます。</p>
+                                    </div>
+                                    <div class="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                                        <label class="text-sm font-bold text-emerald-800 block mb-1">月末残高 (円)</label>
+                                        <input type="number" id="edit-hist-balance" value="${sel.balance}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-300 bg-white" required />
+                                    </div>
+                                    <div class="flex justify-end gap-3 mt-4">
+                                        <button type="button" onclick="App.cancelHistoryEdit()" class="px-6 py-2.5 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50">キャンセル</button>
+                                        <button type="submit" class="px-6 py-2.5 bg-indigo-600 text-white font-bold rounded-lg shadow hover:bg-indigo-700">保存して完了</button>
+                                    </div>
+                                </form>
                             `;
                         } else {
                             html += `
-                                <tr class="bg-white border-b hover:bg-gray-50">
-                                    <td class="px-4 py-3 font-bold text-gray-900">${escapeHTML(h.label)}</td>
-                                    <td class="px-4 py-3 font-mono font-bold text-rose-600">${App.formatCurrency(h.payment)}</td>
-                                    <td class="px-4 py-3 font-mono font-bold ${Number(h.balance) < 0 ? 'text-red-600' : 'text-emerald-600'}">${App.formatCurrency(h.balance)}</td>
-                                    <td class="px-4 py-3 text-right space-x-1 whitespace-nowrap"><button onclick="App.startHistoryEdit('${h.id}')" class="text-gray-400 hover:text-indigo-600 p-1">${App.getIconHTML('pencil', 16)}</button><button onclick="App.handleDeleteHistory('${h.id}')" class="text-gray-400 hover:text-red-500 p-1">${App.getIconHTML('trash-2', 16)}</button></td>
-                                </tr>
+                                <div class="flex items-center justify-between mb-6">
+                                    <h3 class="text-xl font-black text-indigo-900 border-l-4 border-indigo-500 pl-3">${escapeHTML(sel.label)} の詳細</h3>
+                                    <button onclick="App.selectHistory(null)" class="p-1 text-gray-400 hover:bg-gray-100 rounded-full">${App.getIconHTML('close', 24)}</button>
+                                </div>
+                                
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div class="bg-gray-50 rounded-xl p-5 border border-gray-100 flex flex-col justify-center">
+                                        <p class="text-sm text-gray-500 font-bold mb-1">発生総支払</p>
+                                        <p class="text-3xl font-black text-gray-800">${App.formatCurrency(sel.payment)}</p>
+                            `;
+                            
+                            if (sel.catTotals) {
+                                html += `<div class="mt-4 space-y-2 border-t border-gray-200 pt-4">`;
+                                if (sel.catTotals.loan) html += `<div class="flex justify-between items-center text-sm"><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-purple-400 rounded-sm"></span>ローン</span><span class="font-bold text-gray-700">${App.formatCurrency(sel.catTotals.loan)}</span></div>`;
+                                if (sel.catTotals.fixed) html += `<div class="flex justify-between items-center text-sm"><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></span>固定費</span><span class="font-bold text-gray-700">${App.formatCurrency(sel.catTotals.fixed)}</span></div>`;
+                                if (sel.catTotals.variable) html += `<div class="flex justify-between items-center text-sm"><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-rose-400 rounded-sm"></span>変動費</span><span class="font-bold text-gray-700">${App.formatCurrency(sel.catTotals.variable)}</span></div>`;
+                                if (sel.catTotals.investment) html += `<div class="flex justify-between items-center text-sm"><span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 bg-emerald-400 rounded-sm"></span>投資</span><span class="font-bold text-gray-700">${App.formatCurrency(sel.catTotals.investment)}</span></div>`;
+                                html += `</div>`;
+                            } else {
+                                html += `<p class="text-xs text-gray-400 mt-3 border-t border-gray-200 pt-3">カテゴリ別の内訳データはありません</p>`;
+                            }
+                            
+                            html += `
+                                    </div>
+                                    <div class="flex flex-col gap-4">
+                                        <div class="${sel.balance < 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'} rounded-xl p-5 border flex-1 flex flex-col justify-center">
+                                            <p class="text-sm ${sel.balance < 0 ? 'text-red-600' : 'text-emerald-700'} font-bold mb-1">月末残高</p>
+                                            <p class="text-3xl font-black ${sel.balance < 0 ? 'text-red-700' : 'text-emerald-800'}">${App.formatCurrency(sel.balance)}</p>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button onclick="App.startHistoryEdit('${sel.id}')" class="flex-1 py-3 bg-white border border-indigo-200 text-indigo-700 font-bold rounded-xl hover:bg-indigo-50 flex items-center justify-center gap-2 shadow-sm transition-colors">
+                                                ${App.getIconHTML('pencil', 18)} データを修正
+                                            </button>
+                                            <button onclick="App.requestDelete('history', '${sel.id}', '${escapeHTML(sel.label)}の履歴')" class="flex-1 py-3 bg-white border border-red-200 text-red-600 font-bold rounded-xl hover:bg-red-50 flex items-center justify-center gap-2 shadow-sm transition-colors">
+                                                ${App.getIconHTML('trash-2', 18)} 削除
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             `;
                         }
-                    });
-                    html += `</tbody></table></div>`;
+                        html += `</div>`;
+                    }
                 } else {
-                    html += `<p class="text-sm text-gray-400 text-center py-4">データがありません</p>`;
+                    html += `
+                        <div class="bg-white rounded-2xl p-8 border-2 border-gray-100 border-dashed text-center mt-6 shadow-sm">
+                            <div class="inline-flex items-center justify-center w-12 h-12 bg-gray-50 rounded-full mb-3 text-gray-400">${App.getIconHTML('bar-chart-3', 28)}</div>
+                            <p class="text-gray-500 font-bold">グラフの棒をタップすると、ここに詳細が表示されます</p>
+                        </div>
+                    `;
                 }
-                html += `</div></div>`;
+
+                html += `</div>`;
                 return html;
             },
 
@@ -1110,6 +1069,20 @@
                 let html = '';
                 const s = App.state;
 
+                // バックアップ失敗エラーモーダル
+                if (s.showBackupErrorModal) {
+                    html += `
+                        <div class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
+                            <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center animate-zoom-in">
+                                <div class="flex justify-center mb-4 text-red-500">${App.getIconHTML('error_outline', 40)}</div>
+                                <h3 class="text-xl font-bold text-gray-800 mb-2">バックアップ失敗</h3>
+                                <p class="text-sm text-gray-600 mb-6">iPhoneの仕様やブラウザの制限により、自動でのファイル作成に失敗しました。<br>「設定」タブから手動でテキストをコピーして保存してください。</p>
+                                <button onclick="App.closeModal('showBackupErrorModal')" class="w-full py-2.5 bg-gray-800 text-white font-bold rounded-lg hover:bg-gray-700">閉じる</button>
+                            </div>
+                        </div>
+                    `;
+                }
+
                 if (s.preSaveModal) {
                     html += `
                         <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[80] p-4 animate-fade-in">
@@ -1131,8 +1104,8 @@
                         <div class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fade-in">
                             <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl text-center animate-zoom-in">
                                 <div class="mx-auto w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4">${App.getIconHTML('check-circle-2', 32)}</div>
-                                <h3 class="text-xl font-bold text-gray-800 mb-2">前月データの自動保存</h3><p class="text-sm text-gray-600 mb-6">月替わりを検知したため、前月の最終状態を推移グラフに自動保存し、変動費をリセットしました。</p>
-                                <button onclick="App.closeModal('showAutoSaveModal')" class="w-full py-2.5 bg-gray-800 text-white font-bold rounded-lg hover:bg-gray-700">確認</button>
+                                <h3 class="text-xl font-bold text-gray-800 mb-2">前月データの自動保存</h3><p class="text-sm text-gray-600 mb-6">月替わりを検知したため、前月の最終状態を推移グラフに自動保存し、変動費をリセットしました。<br><br>続いてファイルのバックアップを生成します。</p>
+                                <button onclick="App.handleAutoSaveConfirm()" class="w-full py-2.5 bg-gray-800 text-white font-bold rounded-lg hover:bg-gray-700">確認してバックアップ</button>
                             </div>
                         </div>
                     `;
