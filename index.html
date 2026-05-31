@@ -60,7 +60,6 @@
         };
         const SAFE_CAT = { label: '未分類', icon: 'payments', color: 'text-gray-600', bg: 'bg-gray-400', border: 'border-gray-200' };
 
-        // 項目ごとに自動で割り当てるカラーパレット（Tailwindの背景色クラス）
         const ITEM_COLORS = [
             'bg-red-400', 'bg-orange-400', 'bg-amber-400', 'bg-yellow-400', 'bg-lime-400',
             'bg-green-400', 'bg-emerald-400', 'bg-teal-400', 'bg-cyan-400', 'bg-sky-400',
@@ -85,7 +84,7 @@
         const App = {
             state: {
                 activeTab: 'dashboard', dashTab: 'accounts',
-                chartMode: 'all', // 'all', 'pay_cat', 'pay_item', 'inc_item'
+                chartMode: 'all', // 'all', 'payment', 'income'
                 accounts: [], wallets: [], incomes: [], payments: [], history: [],
                 expandedPayIds: new Set(), editMode: null, deleteTarget: null,
                 selectedAccountPopup: null, preSaveModal: null, showAutoSaveModal: false,
@@ -100,7 +99,6 @@
                 return `<span class="material-symbols-outlined ${className}" style="font-size: ${size}px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;">${mappedName}</span>`;
             },
 
-            // 文字列から色を決定するハッシュ関数
             getColorForName: function(name) {
                 if (!name) return 'bg-gray-400';
                 let hash = 0;
@@ -153,15 +151,23 @@
             getPreviousMonthStr: function() { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; },
             cleanInput: function(val) { return String(val || '').replace(/,/g, ''); },
 
-            getNiceMax: function(val) {
-                if (val <= 0) return 40000;
-                const pow = Math.pow(10, Math.floor(Math.log10(val)));
-                const frac = val / pow;
-                let niceFrac;
-                if (frac <= 1) niceFrac = 1; else if (frac <= 1.2) niceFrac = 1.2; else if (frac <= 1.6) niceFrac = 1.6;
-                else if (frac <= 2) niceFrac = 2; else if (frac <= 4) niceFrac = 4; else if (frac <= 6) niceFrac = 6;
-                else if (frac <= 8) niceFrac = 8; else niceFrac = 10;
-                return niceFrac * pow;
+            // 目盛りを綺麗な整数にするための関数
+            getNiceStep: function(maxVal) {
+                if (maxVal <= 0) return { max: 100000, step: 25000 };
+                const magnitude = Math.pow(10, Math.floor(Math.log10(maxVal)));
+                const frac = maxVal / magnitude;
+                let step;
+                if (frac <= 1.2) step = 0.25 * magnitude;
+                else if (frac <= 2.5) step = 0.5 * magnitude;
+                else if (frac <= 5) step = 1 * magnitude;
+                else if (frac <= 7.5) step = 1.5 * magnitude;
+                else step = 2 * magnitude;
+
+                let top = 0;
+                while (top < maxVal) { top += step; }
+                if (top - maxVal < step * 0.1) top += step;
+                
+                return { max: top, step: step };
             },
 
             safeLoadArray: function(keys) {
@@ -387,7 +393,7 @@
                     income: App.totals.totalIncomesList,
                     catTotals: App.totals.allCatTotals,
                     details: App.createHistoryDetails(),
-                    incomeDetails: App.createIncomeDetails() // 収入の詳細も保存
+                    incomeDetails: App.createIncomeDetails()
                 };
                 App.render();
             },
@@ -406,7 +412,6 @@
                 if (!sel) return;
                 App.state.historyEditMode = id; 
                 let temp = JSON.parse(JSON.stringify(sel));
-                // 過去データの互換補完
                 if (!temp.details) {
                     temp.details = { loan: [], fixed: [], variable: [], investment: [] };
                     if (temp.catTotals) { Object.keys(temp.catTotals).forEach(cat => { if (temp.catTotals[cat] > 0) temp.details[cat].push({ id: 'old_'+cat, name: CAT_LABELS[cat].label + '合計', amount: temp.catTotals[cat] }); }); } 
@@ -554,7 +559,6 @@
             renderCategorySelectLg: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`; },
             renderAccountSelect: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}</select>`; },
 
-            // --- メイン描画 ---
             render: function() {
                 App.calculateTotals();
                 const appDiv = document.getElementById('app');
@@ -584,7 +588,6 @@
                 appDiv.innerHTML = html;
             },
 
-            // --- サブ描画群 ---
             renderDashboard: function() {
                 const s = App.state;
                 let html = `
@@ -773,7 +776,6 @@
                 const s = App.state;
                 let html = `<div class="animate-fade-in max-w-4xl mx-auto space-y-4">`;
                 
-                // カテゴリ別集計
                 html += `<div class="grid grid-cols-2 md:grid-cols-4 gap-3">`;
                 Object.entries(CAT_LABELS).forEach(([key, data]) => {
                     html += `
@@ -943,7 +945,7 @@
                 `;
             },
 
-            // --- ★ グラフ表示（4モード切替・棒の細身化・カラーパレット対応） ---
+            // --- 推移グラフ描画処理 ---
             renderHistory: function() {
                 const s = App.state;
                 let html = `
@@ -960,56 +962,194 @@
                                 </div>
                             </div>
                             
-                            <!-- ★ 表示モード切替タブ -->
+                            <!-- 表示モード切替タブ -->
                             <div class="flex bg-gray-100 p-1 rounded-lg w-max mb-6 overflow-x-auto hide-scrollbar max-w-full">
-                                <button onclick="App.setChartMode('all')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='all'?'bg-white shadow text-gray-800':'text-gray-500 hover:bg-gray-200'}">すべて</button>
-                                <button onclick="App.setChartMode('pay_cat')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='pay_cat'?'bg-white shadow text-rose-600':'text-gray-500 hover:bg-gray-200'}">支払(カテゴリ別)</button>
-                                <button onclick="App.setChartMode('pay_item')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='pay_item'?'bg-white shadow text-indigo-600':'text-gray-500 hover:bg-gray-200'}">支払(項目別)</button>
-                                <button onclick="App.setChartMode('inc_item')" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='inc_item'?'bg-white shadow text-emerald-600':'text-gray-500 hover:bg-gray-200'}">収入(項目別)</button>
+                                <button onclick="App.setChartMode('all')" class="px-6 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='all'?'bg-white shadow text-gray-800':'text-gray-500 hover:bg-gray-200'}">すべて</button>
+                                <button onclick="App.setChartMode('payment')" class="px-6 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='payment'?'bg-white shadow text-rose-600':'text-gray-500 hover:bg-gray-200'}">支払い</button>
+                                <button onclick="App.setChartMode('income')" class="px-6 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='income'?'bg-white shadow text-emerald-600':'text-gray-500 hover:bg-gray-200'}">収入</button>
                             </div>
                 `;
                 
                 if (s.history.length === 0) {
                     html += `<div class="h-64 mt-8 flex items-center justify-center border-b-2 border-gray-200 pb-2 relative"><p class="text-gray-400">履歴データがまだありません</p></div>`;
                 } else {
+                    // 全データから最大値を計算し、綺麗な目盛りのステップを算出
                     const rawMax = Math.max(...s.history.map(h => Math.max(Number(h.payment)||0, Number(h.balance)||0, Number(h.income)||0)), 1);
-                    const maxVal = App.getNiceMax(rawMax);
-                    const yAxisValues = [1, 0.75, 0.5, 0.25, 0].map(ratio => maxVal * ratio);
+                    const scale = App.getNiceStep(rawMax);
+                    const maxVal = scale.max;
                     const len = s.history.length;
+                    
+                    // 目盛りの値の配列 (上から下へ)
+                    const yAxisValues = [];
+                    for (let v = maxVal; v >= 0; v -= scale.step) {
+                        yAxisValues.push(v);
+                    }
 
-                    // 折れ線(SVG)生成
-                    let svgLines = '';
+                    // --- 積み上げ順序と境界データの事前計算 ---
+                    const incItemOrderList = [];
+                    const payItemOrderList = [];
+                    const payCatOrderList = ['investment', 'variable', 'fixed', 'loan'];
+
+                    // 全期間から項目名の一覧を収集・ソート
+                    s.history.forEach(h => {
+                        const iDetails = h.incomeDetails || (h.income > 0 ? [{name: '過去の収入', amount: h.income}] : []);
+                        iDetails.forEach(d => { if (!incItemOrderList.includes(d.name)) incItemOrderList.push(d.name); });
+                    });
+                    incItemOrderList.sort();
+
+                    payCatOrderList.forEach(cat => {
+                        const itemsInCat = new Set();
+                        s.history.forEach(h => {
+                            if (h.details && h.details[cat]) {
+                                h.details[cat].forEach(d => itemsInCat.add(d.name));
+                            }
+                        });
+                        Array.from(itemsInCat).sort().forEach(name => {
+                            if (!payItemOrderList.includes(name)) payItemOrderList.push(name);
+                        });
+                    });
+                    s.history.forEach(h => {
+                        if (h.details) {
+                            Object.keys(h.details).forEach(cat => {
+                                if (!payCatOrderList.includes(cat)) {
+                                    h.details[cat].forEach(d => { if (!payItemOrderList.includes(d.name)) payItemOrderList.push(d.name); });
+                                }
+                            });
+                        } else if (h.payment > 0) {
+                            if (!payItemOrderList.includes('過去の支払い')) payItemOrderList.push('過去の支払い');
+                        }
+                    });
+
+                    // 各月の積み上げデータと境界値（下から）を計算
+                    const histBars = s.history.map(data => {
+                        const incItems = []; const incBoundaries = {}; let currentInc = 0;
+                        const iMap = {};
+                        const iDetails = data.incomeDetails || (data.income > 0 ? [{name: '過去の収入', amount: data.income}] : []);
+                        iDetails.forEach(d => { iMap[d.name] = (iMap[d.name] || 0) + App.calcAmount(d.amount); });
+                        
+                        incItemOrderList.forEach(name => {
+                            const amt = iMap[name] || 0;
+                            if (amt > 0) {
+                                incItems.push({ name, amount: amt, color: App.getColorForName(name) });
+                                currentInc += amt;
+                            }
+                            incBoundaries[name] = currentInc;
+                        });
+
+                        const payCats = []; const payCatBoundaries = {}; let currentPayCat = 0;
+                        payCatOrderList.forEach(cat => {
+                            let catAmt = 0;
+                            if (data.catTotals && data.catTotals[cat]) catAmt = data.catTotals[cat];
+                            else if (data.details && data.details[cat]) catAmt = data.details[cat].reduce((s, d) => s + App.calcAmount(d.amount), 0);
+                            
+                            if (catAmt > 0) {
+                                payCats.push({ cat, amount: catAmt, bg: CAT_LABELS[cat].bg });
+                                currentPayCat += catAmt;
+                            }
+                            payCatBoundaries[cat] = currentPayCat;
+                        });
+                        const payValue = Number(data.payment) || 0;
+                        if (currentPayCat === 0 && payValue > 0) {
+                            payCats.push({ cat: 'variable', amount: payValue, bg: 'bg-rose-400' });
+                            currentPayCat += payValue;
+                            payCatBoundaries['variable'] = currentPayCat;
+                        }
+
+                        const payItems = []; const payItemBoundaries = {}; let currentPayItem = 0;
+                        const pMap = {};
+                        if (data.details) {
+                            Object.keys(data.details).forEach(cat => {
+                                data.details[cat].forEach(d => { pMap[d.name] = (pMap[d.name] || 0) + App.calcAmount(d.amount); });
+                            });
+                        } else if (payValue > 0) pMap['過去の支払い'] = payValue;
+                        
+                        payItemOrderList.forEach(name => {
+                            const amt = pMap[name] || 0;
+                            if (amt > 0) {
+                                payItems.push({ name, amount: amt, color: App.getColorForName(name) });
+                                currentPayItem += amt;
+                            }
+                            payItemBoundaries[name] = currentPayItem;
+                        });
+
+                        return { 
+                            incItems, incBoundaries, currentInc, 
+                            payCats, payCatBoundaries, currentPayCat, 
+                            payItems, payItemBoundaries, currentPayItem,
+                            balance: Number(data.balance) || 0
+                        };
+                    });
+
+                    // --- SVG（点線）の生成 ---
+                    let commonLines = '';
+                    let allIncLines = '';
+                    let allPayLines = '';
+                    
                     for (let i = 0; i < len - 1; i++) {
-                        const h1 = s.history[i]; const h2 = s.history[i+1];
-                        const x1 = ((i + 0.5) / len) * 100; const x2 = ((i + 1.5) / len) * 100;
+                        const b1 = histBars[i]; const b2 = histBars[i+1];
+                        const xCenter1 = ((i + 0.5) / len) * 100;
+                        const xCenter2 = ((i + 1.5) / len) * 100;
                         
-                        const yBal1 = Math.max(Math.min((h1.balance / maxVal) * 100, 100), 0);
-                        const yBal2 = Math.max(Math.min((h2.balance / maxVal) * 100, 100), 0);
-                        svgLines += `<line x1="${x1}%" y1="${100 - yBal1}%" x2="${x2}%" y2="${100 - yBal2}%" stroke="#10b981" stroke-width="2" stroke-dasharray="4 4" />`;
+                        // 残高推移の線（常に表示）
+                        const yBal1 = Math.max(Math.min((b1.balance / maxVal) * 100, 100), 0);
+                        const yBal2 = Math.max(Math.min((b2.balance / maxVal) * 100, 100), 0);
+                        commonLines += `<line x1="${xCenter1}%" y1="${100 - yBal1}%" x2="${xCenter2}%" y2="${100 - yBal2}%" stroke="#10b981" stroke-width="2.5" stroke-dasharray="5 4" />`;
                         
-                        if (s.chartMode === 'pay_cat' || s.chartMode === 'pay_item') {
-                            const yPay1 = Math.min((h1.payment / maxVal) * 100, 100); const yPay2 = Math.min((h2.payment / maxVal) * 100, 100);
-                            svgLines += `<line x1="${x1}%" y1="${100 - yPay1}%" x2="${x2}%" y2="${100 - yPay2}%" stroke="#f43f5e" stroke-width="2" stroke-dasharray="4 4" opacity="0.5" />`;
-                        } else if (s.chartMode === 'inc_item') {
-                            const yInc1 = Math.min(((h1.income||0) / maxVal) * 100, 100); const yInc2 = Math.min(((h2.income||0) / maxVal) * 100, 100);
-                            svgLines += `<line x1="${x1}%" y1="${100 - yInc1}%" x2="${x2}%" y2="${100 - yInc2}%" stroke="#34d399" stroke-width="2" stroke-dasharray="4 4" opacity="0.5" />`;
+                        const lineStyle = `stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="2 3" opacity="0.6"`; // 境界用の薄いグレー点線
+                        
+                        if (s.chartMode === 'all') {
+                            // 収入（項目境界）
+                            incItemOrderList.slice(0, -1).forEach(name => {
+                                const v1 = b1.incBoundaries[name]; const v2 = b2.incBoundaries[name];
+                                if (v1 > 0 || v2 > 0) allIncLines += `<line x1="${xCenter1}%" y1="${100 - (v1/maxVal)*100}%" x2="${xCenter2}%" y2="${100 - (v2/maxVal)*100}%" ${lineStyle} />`;
+                            });
+                            // 収入（頂点）
+                            if (b1.currentInc > 0 || b2.currentInc > 0) allIncLines += `<line x1="${xCenter1}%" y1="${100 - (b1.currentInc/maxVal)*100}%" x2="${xCenter2}%" y2="${100 - (b2.currentInc/maxVal)*100}%" stroke="#34d399" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.8" />`;
+                            
+                            // 支出（カテゴリ境界）
+                            payCatOrderList.slice(0, -1).forEach(cat => {
+                                const v1 = b1.payCatBoundaries[cat]; const v2 = b2.payCatBoundaries[cat];
+                                if (v1 > 0 || v2 > 0) allPayLines += `<line x1="${xCenter1}%" y1="${100 - (v1/maxVal)*100}%" x2="${xCenter2}%" y2="${100 - (v2/maxVal)*100}%" ${lineStyle} />`;
+                            });
+                            // 支出（頂点）
+                            if (b1.currentPayCat > 0 || b2.currentPayCat > 0) allPayLines += `<line x1="${xCenter1}%" y1="${100 - (b1.currentPayCat/maxVal)*100}%" x2="${xCenter2}%" y2="${100 - (b2.currentPayCat/maxVal)*100}%" stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.8" />`;
+                            
+                        } else if (s.chartMode === 'payment') {
+                            payItemOrderList.slice(0, -1).forEach(name => {
+                                const v1 = b1.payItemBoundaries[name]; const v2 = b2.payItemBoundaries[name];
+                                if (v1 > 0 || v2 > 0) commonLines += `<line x1="${xCenter1}%" y1="${100 - (v1/maxVal)*100}%" x2="${xCenter2}%" y2="${100 - (v2/maxVal)*100}%" ${lineStyle} />`;
+                            });
+                            if (b1.currentPayItem > 0 || b2.currentPayItem > 0) commonLines += `<line x1="${xCenter1}%" y1="${100 - (b1.currentPayItem/maxVal)*100}%" x2="${xCenter2}%" y2="${100 - (b2.currentPayItem/maxVal)*100}%" stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.8" />`;
+                            
+                        } else if (s.chartMode === 'income') {
+                            incItemOrderList.slice(0, -1).forEach(name => {
+                                const v1 = b1.incBoundaries[name]; const v2 = b2.incBoundaries[name];
+                                if (v1 > 0 || v2 > 0) commonLines += `<line x1="${xCenter1}%" y1="${100 - (v1/maxVal)*100}%" x2="${xCenter2}%" y2="${100 - (v2/maxVal)*100}%" ${lineStyle} />`;
+                            });
+                            if (b1.currentInc > 0 || b2.currentInc > 0) commonLines += `<line x1="${xCenter1}%" y1="${100 - (b1.currentInc/maxVal)*100}%" x2="${xCenter2}%" y2="${100 - (b2.currentInc/maxVal)*100}%" stroke="#34d399" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.8" />`;
                         }
                     }
+
+                    let svgLines = commonLines;
+                    if (s.chartMode === 'all') {
+                        // htmlの gap-1(4px) と w-3.5(14px) から、中心からのズレを 9px (7+2) に設定
+                        svgLines += `<g transform="translate(-9, 0)">${allIncLines}</g><g transform="translate(9, 0)">${allPayLines}</g>`;
+                    }
                     
-                    html += `<div class="relative h-[280px] mt-2 flex">`;
+                    html += `<div class="relative h-[320px] mt-2 flex">`;
                     
-                    // Y軸
+                    // --- Y軸目盛り描画 ---
                     html += `
-                        <div class="w-16 shrink-0 flex flex-col justify-between items-end pr-2 pb-8 text-[10px] text-gray-400 font-mono z-10 bg-white border-r border-gray-100">
-                            ${yAxisValues.map(val => `<span>${val === 0 ? '0' : App.formatCurrency(val).replace('￥', '¥').replace('.00', '')}</span>`).join('')}
+                        <div class="w-[68px] shrink-0 flex flex-col justify-between items-end pr-2 pb-8 text-[10px] text-gray-400 font-mono z-10 bg-white border-r border-gray-100">
+                            ${yAxisValues.map(val => `<span>${val === 0 ? '0' : val.toLocaleString()}</span>`).join('')}
                         </div>
                     `;
 
-                    // グラフ本体
+                    // --- グラフ本体とグリッド線 ---
                     html += `
                         <div class="flex-1 overflow-x-auto hide-scrollbar relative border-b-2 border-gray-200 pb-8">
                             <div class="absolute inset-0 flex flex-col justify-between pointer-events-none z-0 pb-8 px-2 min-w-full">
-                                ${[1, 2, 3, 4, 5].map(() => `<div class="w-full border-t border-gray-200 border-dashed"></div>`).join('')}
+                                ${yAxisValues.map((v, i) => i === yAxisValues.length - 1 ? '' : `<div class="w-full border-t border-gray-200 ${i===0?'border-solid':'border-dashed'}"></div>`).join('')}
                             </div>
                             
                             <div class="flex items-end justify-around gap-6 h-full px-4 min-w-max relative z-10">
@@ -1018,103 +1158,37 @@
                                 </svg>
                     `;
                     
+                    // --- 棒の描画 ---
                     s.history.forEach((data, i) => {
                         const isSelected = s.selectedHistoryId === data.id;
-                        const paymentValue = Number(data.payment) || 0;
-                        const balanceValue = Number(data.balance) || 0;
-                        const incomeValue = Number(data.income) || 0;
-                        const paymentHeight = (paymentValue / maxVal) * 100;
-                        const incomeHeight = (incomeValue / maxVal) * 100;
-                        const isShort = balanceValue < 0;
+                        const b = histBars[i];
+                        const isShort = b.balance < 0;
                         
-                        // --- 収入の積み上げ作成 ---
-                        let incBarsHTML = '';
-                        const incDetails = data.incomeDetails || (incomeValue > 0 ? [{name: '過去の収入', amount: incomeValue}] : []);
-                        
-                        if (incDetails.length === 0) {
-                            incBarsHTML = `<div class="w-full h-full bg-emerald-300 rounded-t-[2px]"></div>`;
-                        } else {
-                            incDetails.forEach(d => {
-                                const h = (d.amount / incomeValue) * 100;
-                                const color = App.getColorForName(d.name);
-                                incBarsHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
-                            });
-                        }
+                        // ツールチップ付きの棒生成（ホバー時に詳細名・金額表示）
+                        const incBarsHTML = b.incItems.map(item => `<div style="height: ${(item.amount / b.currentInc) * 100}%;" class="${item.color} w-full rounded-t-[1px] relative group/bar"><div class="hidden group-hover/bar:block absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-[60] shadow">${item.name}: ${App.formatCurrency(item.amount)}</div></div>`).join('');
+                        const payCatBarsHTML = b.payCats.map(item => `<div style="height: ${(item.amount / b.currentPayCat) * 100}%;" class="${item.bg} w-full rounded-t-[1px] relative group/bar"><div class="hidden group-hover/bar:block absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-[60] shadow">${CAT_LABELS[item.cat]?.label||'未分類'}: ${App.formatCurrency(item.amount)}</div></div>`).join('');
+                        const payItemBarsHTML = b.payItems.map(item => `<div style="height: ${(item.amount / b.currentPayItem) * 100}%;" class="${item.color} w-full rounded-t-[1px] relative group/bar"><div class="hidden group-hover/bar:block absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-[60] shadow">${item.name}: ${App.formatCurrency(item.amount)}</div></div>`).join('');
 
-                        // --- 支払いの積み上げ作成（カテゴリ別） ---
-                        let payBarsCatHTML = '';
-                        if (data.catTotals && paymentValue > 0) {
-                            const c = data.catTotals;
-                            const totalCat = (c.loan||0) + (c.fixed||0) + (c.variable||0) + (c.investment||0);
-                            if (totalCat === 0) {
-                                payBarsCatHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
-                            } else {
-                                const pLoan = ((c.loan||0) / totalCat) * 100; const pFixed = ((c.fixed||0) / totalCat) * 100; const pVar = ((c.variable||0) / totalCat) * 100; const pInv = ((c.investment||0) / totalCat) * 100;
-                                payBarsCatHTML += pInv > 0 ? `<div style="height: ${pInv}%;" class="bg-emerald-400 w-full rounded-t-[1px]"></div>` : '';
-                                payBarsCatHTML += pVar > 0 ? `<div style="height: ${pVar}%;" class="bg-rose-400 w-full rounded-t-[1px]"></div>` : '';
-                                payBarsCatHTML += pFixed > 0 ? `<div style="height: ${pFixed}%;" class="bg-indigo-400 w-full rounded-t-[1px]"></div>` : '';
-                                payBarsCatHTML += pLoan > 0 ? `<div style="height: ${pLoan}%;" class="bg-purple-400 w-full rounded-t-[1px]"></div>` : '';
-                            }
-                        } else {
-                            payBarsCatHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
-                        }
-
-                        // --- 支払いの積み上げ作成（項目別） ---
-                        let payBarsItemHTML = '';
-                        let payItemsMap = {};
-                        if (data.details) {
-                            Object.keys(data.details).forEach(cat => {
-                                data.details[cat].forEach(d => {
-                                    if(!payItemsMap[d.name]) payItemsMap[d.name] = 0;
-                                    payItemsMap[d.name] += d.amount;
-                                });
-                            });
-                        } else if (paymentValue > 0) {
-                            payItemsMap['過去の支払い'] = paymentValue;
-                        }
-                        const payItemNames = Object.keys(payItemsMap);
-                        if (payItemNames.length === 0) {
-                            payBarsItemHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
-                        } else {
-                            payItemNames.forEach(name => {
-                                const h = (payItemsMap[name] / paymentValue) * 100;
-                                const color = App.getColorForName(name);
-                                payBarsItemHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
-                            });
-                        }
-
-                        // ★ モードによる棒の出し分け（太さ1/3対応のため幅をw-3.5等にスリム化）
                         let visibleBars = '';
                         if (s.chartMode === 'all') {
                             visibleBars = `
                                 <div class="flex items-end justify-center gap-1 w-full h-full relative z-10">
-                                    <div class="w-3.5 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${incomeHeight}%;">${incBarsHTML}</div>
-                                    <div class="w-3.5 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden" style="height: ${paymentHeight}%;">${payBarsCatHTML}</div>
+                                    <div class="w-3.5 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-visible" style="height: ${(b.currentInc/maxVal)*100}%;">${incBarsHTML}</div>
+                                    <div class="w-3.5 flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-visible" style="height: ${(b.currentPayCat/maxVal)*100}%;">${payCatBarsHTML}</div>
                                 </div>
                             `;
-                        } else if (s.chartMode === 'pay_cat') {
-                            visibleBars = `<div class="w-4 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${paymentHeight}%;">${payBarsCatHTML}</div>`;
-                        } else if (s.chartMode === 'pay_item') {
-                            visibleBars = `<div class="w-4 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${paymentHeight}%;">${payBarsItemHTML}</div>`;
-                        } else if (s.chartMode === 'inc_item') {
-                            visibleBars = `<div class="w-4 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-hidden relative z-10" style="height: ${incomeHeight}%;">${incBarsHTML}</div>`;
+                        } else if (s.chartMode === 'payment') {
+                            visibleBars = `<div class="w-4 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-visible relative z-10" style="height: ${(b.currentPayItem/maxVal)*100}%;">${payItemBarsHTML}</div>`;
+                        } else if (s.chartMode === 'income') {
+                            visibleBars = `<div class="w-4 mx-auto flex flex-col justify-end transition-all duration-500 rounded-t-sm overflow-visible relative z-10" style="height: ${(b.currentInc/maxVal)*100}%;">${incBarsHTML}</div>`;
                         }
 
                         html += `
                                 <div class="flex flex-col items-center flex-1 min-w-[65px] h-full relative cursor-pointer group outline-none" onclick="App.selectHistory('${data.id}')" tabindex="0">
-                                    <div class="opacity-0 group-focus:opacity-100 md:group-hover:opacity-100 transition-opacity absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs p-3 rounded-xl pointer-events-none z-50 whitespace-nowrap shadow-xl">
-                                        <div class="absolute -bottom-1.5 left-1/2 transform -translate-x-1/2 w-3 h-3 bg-gray-800 rotate-45"></div>
-                                        <div class="relative z-10">
-                                            <p class="font-bold text-emerald-300">総入金: ${App.formatCurrency(incomeValue)}</p>
-                                            <p class="border-b border-gray-600 pb-1 mb-1 text-rose-300">総支払: ${App.formatCurrency(paymentValue)}</p>
-                                            <p class="pt-1 font-bold">月末残高: ${App.formatCurrency(balanceValue)}</p>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="w-full h-full flex justify-center items-end relative transition-all duration-300 ${isSelected ? 'opacity-100 drop-shadow-md scale-[1.15]' : (s.selectedHistoryId ? 'opacity-40 grayscale-[50%]' : 'opacity-100 hover:opacity-80')}">
+                                    <div class="w-full h-full flex justify-center items-end relative transition-all duration-300 ${isSelected ? 'opacity-100 drop-shadow-md scale-[1.1]' : (s.selectedHistoryId ? 'opacity-40 grayscale-[50%]' : 'opacity-100 hover:opacity-80')}">
                                         ${visibleBars}
                                         <!-- 月末残高マーカー -->
-                                        <div class="absolute w-10 h-1 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -2)}%; left:50%; transform:translateX(-50%);"></div>
+                                        <div class="absolute w-10 h-1 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((b.balance / maxVal) * 100, 100), -2)}%; left:50%; transform:translateX(-50%);"></div>
                                     </div>
                                     <span class="text-[10px] ${isSelected ? 'text-indigo-600 font-black' : 'text-gray-500 font-bold'} mt-2 whitespace-nowrap absolute -bottom-6">${escapeHTML(data.label)}</span>
                                 </div>
@@ -1136,17 +1210,12 @@
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></div>固定費</span>
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-rose-400 rounded-sm"></div>変動費</span>
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-emerald-400 rounded-sm"></div>投資</span>
-                        <span class="text-gray-500 font-bold ml-2">※収入は自動配色</span>
+                        <span class="text-gray-500 font-bold ml-2">※左の収入棒はダッシュボードの項目で自動配色</span>
                     `;
-                } else if (s.chartMode === 'pay_cat') {
-                    legendHTML = `
-                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-purple-400 rounded-sm"></div>ローン</span>
-                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></div>固定費</span>
-                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-rose-400 rounded-sm"></div>変動費</span>
-                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-emerald-400 rounded-sm"></div>投資</span>
-                    `;
-                } else if (s.chartMode === 'pay_item' || s.chartMode === 'inc_item') {
-                    legendHTML = `<span class="text-gray-500 font-bold">※項目名ごとに自動で色が割り当てられています</span>`;
+                } else if (s.chartMode === 'payment') {
+                    legendHTML = `<span class="text-gray-500 font-bold">※支出の項目名(ダッシュボードの項目)ごとに自動で色が割り当てられています</span>`;
+                } else if (s.chartMode === 'income') {
+                    legendHTML = `<span class="text-gray-500 font-bold">※収入の項目名(ダッシュボードの項目)ごとに自動で色が割り当てられています</span>`;
                 }
 
                 html += `
@@ -1157,7 +1226,7 @@
                         </div>
                 `;
 
-                // ★ グラフ下の詳細・個別の明細編集エリア
+                // --- グラフ下の詳細パネル ---
                 if (s.selectedHistoryId) {
                     const sel = s.history.find(h => h.id === s.selectedHistoryId);
                     if (sel) {
@@ -1165,7 +1234,6 @@
                         
                         if (s.historyEditMode === sel.id) {
                             const temp = s.tempHistoryEditData;
-                            // 詳細編集モード
                             html += `
                                 <div class="flex items-center justify-between mb-4 border-b pb-3">
                                     <h3 class="text-lg font-black text-indigo-800">${escapeHTML(temp.label)} の内訳を修正</h3>
@@ -1186,7 +1254,6 @@
                                         <p class="text-sm font-bold text-gray-700 mb-3">各明細を修正 (自動で総額が再計算されます)</p>
                             `;
                             
-                            // 収入の明細編集
                             if (temp.incomeDetails && temp.incomeDetails.length > 0) {
                                 html += `
                                     <div class="mb-4 bg-blue-50/50 rounded-xl p-3 border border-blue-100">
@@ -1204,7 +1271,6 @@
                                 html += `</div></div>`;
                             }
 
-                            // 支払の明細編集
                             Object.keys(CAT_LABELS).forEach(cat => {
                                 const items = temp.details[cat];
                                 if (items && items.length > 0) {
@@ -1238,7 +1304,6 @@
                                 </form>
                             `;
                         } else {
-                            // 詳細表示モード
                             html += `
                                 <div class="flex items-center justify-between mb-6">
                                     <h3 class="text-xl font-black text-indigo-900 border-l-4 border-indigo-500 pl-3">${escapeHTML(sel.label)} の詳細</h3>
