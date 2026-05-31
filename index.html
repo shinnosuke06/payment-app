@@ -584,6 +584,7 @@
                 appDiv.innerHTML = html;
             },
 
+            // --- サブ描画群 ---
             renderDashboard: function() {
                 const s = App.state;
                 let html = `
@@ -1030,18 +1031,14 @@
                         let incBarsHTML = '';
                         const incDetails = data.incomeDetails || (incomeValue > 0 ? [{name: '過去の収入', amount: incomeValue}] : []);
                         
-                        if (s.chartMode === 'all') {
+                        if (incDetails.length === 0) {
                             incBarsHTML = `<div class="w-full h-full bg-emerald-300 rounded-t-[2px]"></div>`;
                         } else {
-                            if (incDetails.length === 0) {
-                                incBarsHTML = `<div class="w-full h-full bg-emerald-300 rounded-t-[2px]"></div>`;
-                            } else {
-                                incDetails.forEach(d => {
-                                    const h = (d.amount / incomeValue) * 100;
-                                    const color = App.getColorForName(d.name);
-                                    incBarsHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
-                                });
-                            }
+                            incDetails.forEach(d => {
+                                const h = (d.amount / incomeValue) * 100;
+                                const color = App.getColorForName(d.name);
+                                incBarsHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
+                            });
                         }
 
                         // --- 支払いの積み上げ作成（カテゴリ別） ---
@@ -1060,6 +1057,30 @@
                             }
                         } else {
                             payBarsCatHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
+                        }
+
+                        // --- 支払いの積み上げ作成（項目別） ---
+                        let payBarsItemHTML = '';
+                        let payItemsMap = {};
+                        if (data.details) {
+                            Object.keys(data.details).forEach(cat => {
+                                data.details[cat].forEach(d => {
+                                    if(!payItemsMap[d.name]) payItemsMap[d.name] = 0;
+                                    payItemsMap[d.name] += d.amount;
+                                });
+                            });
+                        } else if (paymentValue > 0) {
+                            payItemsMap['過去の支払い'] = paymentValue;
+                        }
+                        const payItemNames = Object.keys(payItemsMap);
+                        if (payItemNames.length === 0) {
+                            payBarsItemHTML = `<div class="w-full h-full bg-rose-400 rounded-t-[2px]"></div>`;
+                        } else {
+                            payItemNames.forEach(name => {
+                                const h = (payItemsMap[name] / paymentValue) * 100;
+                                const color = App.getColorForName(name);
+                                payBarsItemHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
+                            });
                         }
 
                         // ★ モードによる棒の出し分け（太さ1/3対応のため幅をw-3.5等にスリム化）
@@ -1111,11 +1132,11 @@
                 let legendHTML = '';
                 if (s.chartMode === 'all') {
                     legendHTML = `
-                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-emerald-300 rounded-sm"></div>収入合計</span>
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-purple-400 rounded-sm"></div>ローン</span>
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></div>固定費</span>
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-rose-400 rounded-sm"></div>変動費</span>
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-emerald-400 rounded-sm"></div>投資</span>
+                        <span class="text-gray-500 font-bold ml-2">※収入は自動配色</span>
                     `;
                 } else if (s.chartMode === 'pay_cat') {
                     legendHTML = `
