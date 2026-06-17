@@ -78,7 +78,7 @@
             'plus': 'add', 'trash-2': 'delete', 'pencil': 'edit', 'message-square': 'chat_bubble_outline',
             'done': 'done_all', 'undo': 'undo', 'refresh': 'refresh', 'payments': 'payments',
             'home': 'home', 'receipt_long': 'receipt_long', 'credit_card': 'credit_card', 'trending_up': 'trending_up',
-            'error_outline': 'error_outline'
+            'error_outline': 'error_outline', 'cloud_sync': 'cloud_sync', 'cloud_upload': 'cloud_upload'
         };
 
         const App = {
@@ -86,6 +86,7 @@
                 activeTab: 'dashboard', dashTab: 'accounts',
                 chartMode: 'all', 
                 accounts: [], wallets: [], incomes: [], payments: [], history: [],
+                gasUrl: '', syncStatus: { text: '', isError: false, isLoading: false }, // ★GAS連携用の状態を追加
                 expandedPayIds: new Set(), editMode: null, deleteTarget: null,
                 selectedAccountPopup: null, preSaveModal: null, showAutoSaveModal: false,
                 confirmImportData: null, showSuccessModal: false, showBackupErrorModal: false,
@@ -196,6 +197,7 @@
                 App.state.history = App.safeLoadArray([STORAGE_KEY + 'history', 'mpm_vanilla_v6_history', 'mpm_vanilla_v5_history']);
                 App.state.saveMonthStr = App.getCurrentMonthStr();
                 App.state.manualHistoryMonth = App.getPreviousMonthStr();
+                App.state.gasUrl = localStorage.getItem(STORAGE_KEY + 'gasUrl') || ''; // ★GAS URLのロード
             },
 
             saveData: function() {
@@ -407,9 +409,7 @@
             },
             
             startHistoryEdit: function(id) { 
-                // 仮想データの編集はブロック（ダッシュボード側で編集するため）
-                if (id === 'virtual_current') return;
-
+                if (id === 'virtual_current') return; // 見込みデータは編集不可
                 const sel = App.state.history.find(h => h.id === id);
                 if (!sel) return;
                 App.state.historyEditMode = id; 
@@ -553,6 +553,60 @@
                 } catch (e) { App.state.importMsg = { text: 'データの解析に失敗しました。ファイルが正しくない可能性があります。', isError: true }; App.render(); }
             },
             executeImport: function() { const data = App.state.confirmImportData; if (!data) return; App.state.accounts = data.accounts; App.state.wallets = data.wallets; App.state.incomes = data.incomes; App.state.payments = data.payments; App.state.history = data.history; App.state.importData = ''; App.state.confirmImportData = null; App.state.showSuccessModal = true; App.saveData(); App.render(); },
+
+            // ★ 新規追加: GAS URLの保存とスプレッドシートへの同期処理
+            saveGasUrl: function() {
+                const urlInput = document.getElementById('gas-url-input').value.trim();
+                App.state.gasUrl = urlInput;
+                localStorage.setItem(STORAGE_KEY + 'gasUrl', urlInput);
+                App.state.syncStatus = { text: 'URLを保存しました。', isError: false, isLoading: false };
+                App.render();
+                setTimeout(() => { App.state.syncStatus.text = ''; App.render(); }, 3000);
+            },
+
+            syncToSpreadsheet: async function() {
+                if (!App.state.gasUrl) {
+                    App.state.syncStatus = { text: 'GASのURLが設定されていません。', isError: true, isLoading: false };
+                    App.render();
+                    return;
+                }
+
+                App.state.syncStatus = { text: '', isError: false, isLoading: true };
+                App.render();
+
+                try {
+                    const backupData = JSON.stringify({
+                        accounts: App.state.accounts,
+                        wallets: App.state.wallets,
+                        incomes: App.state.incomes,
+                        payments: App.state.payments,
+                        history: App.state.history
+                    });
+
+                    const payload = {
+                        backupData: backupData,
+                        historyData: App.state.history
+                    };
+
+                    const response = await fetch(App.state.gasUrl, {
+                        method: 'POST',
+                        body: JSON.stringify(payload),
+                        // CORSエラーを避けるためにtext/plainで送信し、GAS側でJSON解析させます
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                    });
+
+                    const result = await response.json();
+
+                    if (result.status === 'success') {
+                        App.state.syncStatus = { text: 'スプレッドシートへの保存・更新が完了しました。', isError: false, isLoading: false };
+                    } else {
+                        throw new Error(result.message || '不明なエラーが発生しました。');
+                    }
+                } catch (error) {
+                    App.state.syncStatus = { text: `通信エラー: ${error.message}`, isError: true, isLoading: false };
+                }
+                App.render();
+            },
 
             renderSortButtons: function(type, index, isFirst, isLast) {
                 return `<div class="flex flex-col mr-2 items-center justify-center shrink-0"><button type="button" onclick="App.moveItem('${type}', ${index}, -1, event)" ${isFirst ? 'disabled' : ''} class="p-1.5 ${isFirst ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100'} rounded">${App.getIconHTML('chevron-up', 20)}</button><button type="button" onclick="App.moveItem('${type}', ${index}, 1, event)" ${isLast ? 'disabled' : ''} class="p-1.5 ${isLast ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100'} rounded">${App.getIconHTML('chevron-down', 20)}</button></div>`;
@@ -947,7 +1001,6 @@
                 `;
             },
 
-            // --- 推移グラフ描画処理 ---
             renderHistory: function() {
                 const s = App.state;
                 let html = `
@@ -964,7 +1017,6 @@
                                 </div>
                             </div>
                             
-                            <!-- 表示モード切替タブ -->
                             <div class="flex bg-gray-100 p-1 rounded-lg w-max mb-6 overflow-x-auto hide-scrollbar max-w-full">
                                 <button onclick="App.setChartMode('all')" class="px-6 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='all'?'bg-white shadow text-gray-800':'text-gray-500 hover:bg-gray-200'}">すべて</button>
                                 <button onclick="App.setChartMode('payment')" class="px-6 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${s.chartMode==='payment'?'bg-white shadow text-rose-600':'text-gray-500 hover:bg-gray-200'}">支払い</button>
@@ -972,13 +1024,11 @@
                             </div>
                 `;
                 
-                // グラフ表示用の履歴データ（当月分の仮想データを含めるためディープコピーして拡張）
                 let displayHistory = JSON.parse(JSON.stringify(s.history));
                 
                 const currentMonthStr = App.getCurrentMonthStr();
                 const hasCurrentMonthSaved = displayHistory.some(h => h.id === currentMonthStr);
                 
-                // 【追加】まだ保存されていない当月の状態を仮想的に追加（グラフに「今月(見込)」として出す）
                 if (!hasCurrentMonthSaved) {
                     const [y, m] = currentMonthStr.split('-');
                     displayHistory.push({
@@ -994,7 +1044,6 @@
                     });
                 }
 
-                // 【追加】古いデータに対して、現在のダッシュボードの項目比率で色分けを補完する
                 const currentIncomes = App.createIncomeDetails();
                 const currentIncTotal = currentIncomes.reduce((sum, i) => sum + i.amount, 0) || 1;
                 const currentPayments = App.createHistoryDetails();
@@ -1108,7 +1157,6 @@
                         const xCenter1 = ((i + 0.5) / len) * 100;
                         const xCenter2 = ((i + 1.5) / len) * 100;
                         
-                        // 残高推移の線（常に表示）
                         const yBal1 = Math.max(Math.min((b1.balance / maxVal) * 100, 100), 0);
                         const yBal2 = Math.max(Math.min((b2.balance / maxVal) * 100, 100), 0);
                         commonLines += `<line x1="${xCenter1}%" y1="${100 - yBal1}%" x2="${xCenter2}%" y2="${100 - yBal2}%" stroke="#10b981" stroke-width="2.5" stroke-dasharray="5 4" />`;
@@ -1227,7 +1275,6 @@
                         </div>
                 `;
 
-                // --- グラフ下の詳細パネル ---
                 if (s.selectedHistoryId) {
                     const sel = displayHistory.find(h => h.id === s.selectedHistoryId);
                     if (sel) {
@@ -1401,16 +1448,44 @@
                 return html;
             },
 
+            // ★「設定」タブの描画にスプレッドシート連携セクションを追加
             renderSettings: function() {
                 return `
                     <div class="bg-white rounded-2xl p-6 shadow-md border border-gray-100 animate-zoom-in space-y-8">
+                        
+                        <!-- ★ スプレッドシート連携セクション -->
+                        <div class="bg-indigo-50/50 p-5 rounded-xl border border-indigo-100">
+                            <h3 class="text-lg font-bold text-indigo-800 mb-2 flex items-center gap-2">${App.getIconHTML('cloud_sync', 24)} スプレッドシートへ同期</h3>
+                            <p class="text-sm text-gray-600 mb-4">Google Apps Script (GAS) のURLを設定すると、ご自身のスプレッドシートにバックアップと履歴データを自動転送できます。（無ければシートも自動作成されます）</p>
+                            
+                            <div class="mb-4 space-y-2">
+                                <label class="text-xs font-bold text-indigo-700">GAS ウェブアプリのURL</label>
+                                <div class="flex gap-2">
+                                    <input type="password" id="gas-url-input" value="${escapeHTML(App.state.gasUrl)}" placeholder="https://script.google.com/macros/s/..." class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-300 outline-none bg-white" />
+                                    <button onclick="App.saveGasUrl()" class="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 whitespace-nowrap shadow-sm">URLを保存</button>
+                                </div>
+                            </div>
+
+                            <div class="flex flex-col gap-3 mt-4">
+                                ${App.state.syncStatus.text ? `
+                                    <div class="p-3 rounded-lg text-sm font-bold flex items-start gap-2 animate-fade-in ${App.state.syncStatus.isError ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'}">
+                                        ${App.getIconHTML(App.state.syncStatus.isError ? 'alert-triangle' : 'check-circle-2', 20)}
+                                        <span>${escapeHTML(App.state.syncStatus.text)}</span>
+                                    </div>
+                                ` : ''}
+                                <button onclick="App.syncToSpreadsheet()" ${!App.state.gasUrl || App.state.syncStatus.isLoading ? 'disabled' : ''} class="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white font-bold py-3 px-6 rounded-lg text-sm flex items-center justify-center gap-2 shadow-sm transition-colors">
+                                    ${App.state.syncStatus.isLoading ? App.getIconHTML('refresh', 20, 'animate-spin') + ' 同期中...' : App.getIconHTML('cloud_upload', 20) + ' スプレッドシートに保存・更新する'}
+                                </button>
+                            </div>
+                        </div>
+
                         <div>
                             <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 pb-3 border-b border-gray-100">${App.getIconHTML('refresh', 24, 'text-red-500')} 手動月替わりリセット</h2>
                             <p class="text-sm text-gray-600 mb-4">今すぐ「済」マークの全解除と、変動費の数値を一括で空欄にしたい場合は以下のボタンを押してください。</p>
                             <button onclick="App.handleManualResetClick()" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2.5 px-5 rounded-lg text-sm transition-colors flex items-center gap-1 shadow-sm">${App.getIconHTML('refresh', 18)} 今すぐ一括リセットを実行</button>
                         </div>
                         <div>
-                            <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 pb-3 border-b border-gray-100">${App.getIconHTML('settings', 24, 'text-gray-600')} データのバックアップ・復元</h2>
+                            <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 pb-3 border-b border-gray-100">${App.getIconHTML('settings', 24, 'text-gray-600')} 手動でのバックアップ・復元</h2>
                             <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 <div class="bg-blue-50/50 p-5 rounded-xl border border-blue-100">
                                     <h3 class="text-lg font-bold text-blue-800 mb-2 flex items-center gap-2">${App.getIconHTML('download', 24)} バックアップの発行</h3>
