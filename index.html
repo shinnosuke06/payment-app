@@ -43,6 +43,9 @@
     <div id="app"></div>
 
     <script>
+        // ----------------------------------------------------
+        // アプリケーションの全ロジック
+        // ----------------------------------------------------
         const STORAGE_KEY = 'mpm_vanilla_v8_'; 
 
         const escapeHTML = (str) => {
@@ -83,7 +86,7 @@
                 activeTab: 'dashboard', dashTab: 'accounts',
                 chartMode: 'all',
                 accounts: [], wallets: [], incomes: [], payments: [], history: [], 
-                specialPayments: [], memos: [], // ★新機能のデータ
+                specialPayments: [], memos: [],
                 expandedPayIds: new Set(), editMode: null, deleteTarget: null,
                 selectedAccountPopup: null, preSaveModal: null, showAutoSaveModal: false,
                 confirmImportData: null, showSuccessModal: false, showBackupErrorModal: false,
@@ -177,8 +180,8 @@
                 }));
                 
                 App.state.history = App.safeLoadArray([STORAGE_KEY + 'history', 'mpm_vanilla_v7_history']);
-                App.state.specialPayments = App.safeLoadArray([STORAGE_KEY + 'specialPayments']); // ★追加
-                App.state.memos = App.safeLoadArray([STORAGE_KEY + 'memos']); // ★追加
+                App.state.specialPayments = App.safeLoadArray([STORAGE_KEY + 'specialPayments', 'mpm_vanilla_v7_specialPayments']);
+                App.state.memos = App.safeLoadArray([STORAGE_KEY + 'memos', 'mpm_vanilla_v7_memos']);
 
                 App.state.saveMonthStr = App.getCurrentMonthStr();
                 App.state.manualHistoryMonth = App.getPreviousMonthStr();
@@ -190,8 +193,8 @@
                 localStorage.setItem(STORAGE_KEY + 'incomes', JSON.stringify(App.state.incomes));
                 localStorage.setItem(STORAGE_KEY + 'payments', JSON.stringify(App.state.payments));
                 localStorage.setItem(STORAGE_KEY + 'history', JSON.stringify(App.state.history));
-                localStorage.setItem(STORAGE_KEY + 'specialPayments', JSON.stringify(App.state.specialPayments)); // ★追加
-                localStorage.setItem(STORAGE_KEY + 'memos', JSON.stringify(App.state.memos)); // ★追加
+                localStorage.setItem(STORAGE_KEY + 'specialPayments', JSON.stringify(App.state.specialPayments));
+                localStorage.setItem(STORAGE_KEY + 'memos', JSON.stringify(App.state.memos));
             },
 
             totals: {},
@@ -244,34 +247,47 @@
                     }
                 });
 
-                // ★ 特別支出の当月分をキャッシュフローに合算する処理
+                // ★ 特別支出の当月分合算と、積立の平準化計算アルゴリズム
                 const currentMonth = App.getCurrentMonthStr();
                 let currentMonthSpecialAmt = 0;
                 let totalSpecialAmt = 0;
-                let totalMonthlyRequired = 0; // 毎月の積立必要額
+                let totalMonthlyRequired = 0; 
 
                 const curDate = new Date();
                 const curY = curDate.getFullYear();
                 const curM = curDate.getMonth() + 1;
+
+                let upcomingSpecials = [];
 
                 s.specialPayments.forEach(sp => {
                     if (!sp.isDone) {
                         const amt = App.calcAmount(sp.amount);
                         totalSpecialAmt += amt;
                         
-                        // 今月支払いのものがあれば合算
+                        // 当月分はキャッシュフローに合算
                         if (sp.targetMonth === currentMonth) {
                             currentMonthSpecialAmt += amt;
-                            activePayments += amt; // キャッシュフローの支払いに上乗せ
+                            activePayments += amt;
                         }
 
-                        // 積立額の計算
+                        // 積立計算のための情報収集
                         if (sp.targetMonth) {
                             const [ty, tm] = sp.targetMonth.split('-');
                             let monthsLeft = (parseInt(ty) - curY) * 12 + (parseInt(tm) - curM) + 1;
-                            if (monthsLeft < 1) monthsLeft = 1; // 過ぎているものや当月のものは1ヶ月で計算
-                            totalMonthlyRequired += Math.ceil(amt / monthsLeft);
+                            if (monthsLeft < 1) monthsLeft = 1;
+                            upcomingSpecials.push({ amount: amt, monthsLeft: monthsLeft });
                         }
+                    }
+                });
+
+                // ★ 平準化計算: 残り月数が少ない順に並べ、一番負担が大きい月を基準になだらかにする
+                upcomingSpecials.sort((a, b) => a.monthsLeft - b.monthsLeft);
+                let cumulativeAmt = 0;
+                upcomingSpecials.forEach(sp => {
+                    cumulativeAmt += sp.amount;
+                    const required = Math.ceil(cumulativeAmt / sp.monthsLeft);
+                    if (required > totalMonthlyRequired) {
+                        totalMonthlyRequired = required;
                     }
                 });
 
@@ -306,13 +322,12 @@
                     }
                 });
                 
-                // ★ 特別支出の当月分を明細に追加してグラフに反映させる
                 const currentMonth = App.getCurrentMonthStr();
                 App.state.specialPayments.forEach(sp => {
                     if (!sp.isDone && sp.targetMonth === currentMonth) {
                         const amt = App.calcAmount(sp.amount);
                         if (amt > 0) {
-                            details['fixed'].push({ id: 'd_sp_' + Date.now() + Math.random().toString(), name: '[特] ' + sp.name, amount: amt });
+                            details['fixed'].push({ id: 'd_sp_' + Date.now() + Math.random().toString(), name: '[特別] ' + sp.name, amount: amt });
                         }
                     }
                 });
@@ -343,9 +358,8 @@
             addWallet: function(e, form) { e.preventDefault(); App.state.wallets.push({ id: Date.now(), name: form.walName.value, amount: App.cleanInput(form.walAmount.value), outgoAmount: App.cleanInput(form.walOutgo.value), isOutgoDone: false, isOutgoFixed: form.walIsFixed.checked, memo: form.walMemo.value }); App.saveData(); App.render(); },
             addIncome: function(e, form) { e.preventDefault(); App.state.incomes.push({ id: Date.now(), name: form.incName.value, amount: App.cleanInput(form.incAmount.value), isFixed: form.incIsFixed.checked, isDone: false, memo: form.incMemo.value }); App.saveData(); App.render(); },
             addPayment: function(e, form) { e.preventDefault(); App.state.payments.push({ id: Date.now(), name: form.payName.value, amount: App.cleanInput(form.payAmount.value), dueDate: form.payDueDate.value ? Number(form.payDueDate.value) : null, endDate: form.payEndDate.value || '', accountId: form.payAccountId.value ? Number(form.payAccountId.value) : '', category: form.payCat.value, isDone: false, memo: form.payMemo.value, subItems: [] }); App.saveData(); App.render(); },
-            addSubItem: function(e, form, paymentId) { e.preventDefault(); const newItem = { id: Date.now(), name: form.subName.value, amount: App.cleanInput(form.subAmount.value), category: form.subCat.value, endDate: '', memo: form.subMemo.value }; App.state.payments = App.state.payments.map(p => p.id === paymentId ? { ...p, subItems: [...(p.subItems||[]), newItem] } : p); App.saveData(); App.render(); },
+            addSubItem: function(e, form, paymentId) { e.preventDefault(); const newItem = { id: Date.now(), name: form.subName.value, amount: App.cleanInput(form.subAmount.value), category: form.subCat.value, endDate: form.subEndDate ? form.subEndDate.value : '', memo: form.subMemo.value }; App.state.payments = App.state.payments.map(p => p.id === paymentId ? { ...p, subItems: [...(p.subItems||[]), newItem] } : p); App.saveData(); App.render(); },
             
-            // ★ 新機能：特別支出とメモの追加
             addSpecialPayment: function(e, form) { e.preventDefault(); App.state.specialPayments.push({ id: Date.now(), name: form.spName.value, amount: App.cleanInput(form.spAmount.value), targetMonth: form.spMonth.value, memo: form.spMemo.value, isDone: false }); App.saveData(); App.render(); },
             addMemo: function(e, form) { e.preventDefault(); App.state.memos.push({ id: Date.now(), title: form.mTitle.value, targetDate: form.mDate.value, content: form.mContent.value }); App.state.memos.sort((a,b)=>new Date(a.targetDate) - new Date(b.targetDate)); App.saveData(); App.render(); },
 
@@ -387,8 +401,8 @@
                 if (type === 'account') App.state.accounts = App.state.accounts.map(a => a.id === id ? { ...a, name: form.name.value, amount: App.cleanInput(form.amount.value), incomingAmount: App.cleanInput(form.incomingAmount.value), memo: form.memo.value } : a);
                 else if (type === 'wallet') App.state.wallets = App.state.wallets.map(w => w.id === id ? { ...w, name: form.name.value, amount: App.cleanInput(form.amount.value), outgoAmount: App.cleanInput(form.outgoAmount.value), isOutgoFixed: form.isOutgoFixed.checked, memo: form.memo.value } : w);
                 else if (type === 'income') App.state.incomes = App.state.incomes.map(i => i.id === id ? { ...i, name: form.name.value, amount: App.cleanInput(form.amount.value), isFixed: form.isFixed.checked, memo: form.memo.value } : i);
-                else if (type === 'payment') App.state.payments = App.state.payments.map(p => p.id === id ? { ...p, name: form.name.value, amount: App.cleanInput(form.amount.value), dueDate: form.dueDate.value ? Number(form.dueDate.value) : null, endDate: form.endDate.value || '', accountId: form.accountId.value ? Number(form.accountId.value) : '', category: form.category.value, memo: form.memo.value } : p);
-                else if (type === 'subItem') App.state.payments = App.state.payments.map(p => { if (p.id === paymentId) { return { ...p, subItems: p.subItems.map(s => s.id === id ? { ...s, name: form.name.value, amount: App.cleanInput(form.amount.value), category: form.category.value, memo: form.memo.value } : s) }; } return p; });
+                else if (type === 'payment') App.state.payments = App.state.payments.map(p => p.id === id ? { ...p, name: form.name.value, amount: App.cleanInput(form.amount.value), dueDate: form.dueDate.value ? Number(form.dueDate.value) : null, endDate: form.endDate ? form.endDate.value : '', accountId: form.accountId.value ? Number(form.accountId.value) : '', category: form.category.value, memo: form.memo.value } : p);
+                else if (type === 'subItem') App.state.payments = App.state.payments.map(p => { if (p.id === paymentId) { return { ...p, subItems: p.subItems.map(s => s.id === id ? { ...s, name: form.name.value, amount: App.cleanInput(form.amount.value), category: form.category.value, endDate: form.endDate ? form.endDate.value : '', memo: form.memo.value } : s) }; } return p; });
                 else if (type === 'special') App.state.specialPayments = App.state.specialPayments.map(sp => sp.id === id ? { ...sp, name: form.name.value, amount: App.cleanInput(form.amount.value), targetMonth: form.targetMonth.value, memo: form.memo.value } : sp);
                 else if (type === 'memo') { App.state.memos = App.state.memos.map(m => m.id === id ? { ...m, title: form.title.value, targetDate: form.targetDate.value, content: form.content.value } : m); App.state.memos.sort((a,b)=>new Date(a.targetDate) - new Date(b.targetDate)); }
                 App.state.editMode = null; App.saveData(); App.render();
@@ -399,7 +413,6 @@
                 App.state.wallets.forEach(w => { w.outgoAmount = w.isOutgoFixed ? w.outgoAmount : ''; w.isOutgoDone = false; });
                 App.state.incomes.forEach(i => { i.amount = i.isFixed ? i.amount : ''; i.isDone = false; });
                 App.state.payments.forEach(p => { p.amount = p.category === 'variable' ? '' : p.amount; p.isDone = false; if (p.subItems) p.subItems.forEach(s => { s.amount = s.category === 'variable' ? '' : s.amount; }); });
-                // 特別支出で今月のものが済んでいればそのまま、未済でもそのまま残す（ユーザー手動管理）
             },
             handleManualResetClick: function() {
                 if (window.confirm('すべての「済」を解除し、変動費の金額をリセットします。')) {
@@ -459,7 +472,9 @@
                     else { temp.details.variable.push({ id: 'old_all', name: '過去の支払い合計', amount: temp.payment }); }
                 }
                 if(temp.income === undefined) temp.income = 0;
-                if(!temp.incomeDetails) { temp.incomeDetails = temp.income > 0 ? [{ id: 'old_inc', name: '過去の収入合計', amount: temp.income }] : []; }
+                if(!temp.incomeDetails) {
+                    temp.incomeDetails = temp.income > 0 ? [{ id: 'old_inc', name: '過去の収入合計', amount: temp.income }] : [];
+                }
                 App.state.tempHistoryEditData = temp;
                 App.render(); 
             },
@@ -500,7 +515,6 @@
                 App.state.historyEditMode = null; App.state.tempHistoryEditData = null; App.saveData(); App.render();
             },
 
-            // --- バックアップ ---
             safeMemo: function(memo) { return String(memo || '').replace(/,/g, '，').replace(/\n/g, ' '); },
             generateExportText: function() {
                 let txt = "---支払い管理バックアップ---\n\n【手元現金】\n";
@@ -574,7 +588,7 @@
                             else if (pts.length >= 3) {
                                 let dueDate = pts[3] ? Number(pts[3]) : null; let accountId = pts[4] ? Number(pts[4]) : ''; let cat = 'variable'; let isDone = false; let memo = ''; let endDate = '';
                                 if (pts.length === 6) { memo = pts[5]; } else if (pts.length === 7) { cat = pts[5] === '1' ? 'fixed' : 'variable'; memo = pts[6]; } else if (pts.length >= 8) { cat = (pts[5] === '1' || pts[5] === '0') ? (pts[5]==='1'?'fixed':'variable') : pts[5]; isDone = pts[6] === '1'; memo = pts[7]; }
-                                if (pts.length >= 9) { endDate = pts[8]; memo = pts.slice(7, -1).join(','); } else { memo = pts.slice(7).join(','); } // 拡張フォーマット用
+                                if (pts.length >= 9) { endDate = pts[8]; memo = pts.slice(7, -1).join(','); } else { memo = pts.slice(7).join(','); } 
                                 currP = { id: Number(pts[0]), name: pts[1], amount: pts[2], dueDate: dueDate, endDate: endDate, accountId: accountId, category: cat, isDone: isDone, memo: memo, subItems: [] };
                                 nP.push(currP);
                             }
@@ -596,7 +610,6 @@
             },
             executeImport: function() { const data = App.state.confirmImportData; if (!data) return; App.state.accounts = data.accounts; App.state.wallets = data.wallets; App.state.incomes = data.incomes; App.state.payments = data.payments; App.state.history = data.history; App.state.specialPayments = data.specialPayments || []; App.state.memos = data.memos || []; App.state.importData = ''; App.state.confirmImportData = null; App.state.showSuccessModal = true; App.saveData(); App.render(); },
 
-            // --- HTML描画パーツ ---
             renderSortButtons: function(type, index, isFirst, isLast) {
                 return `<div class="flex flex-col mr-2 items-center justify-center shrink-0"><button type="button" onclick="App.moveItem('${type}', ${index}, -1, event)" ${isFirst ? 'disabled' : ''} class="p-1.5 ${isFirst ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100'} rounded">${App.getIconHTML('chevron-up', 20)}</button><button type="button" onclick="App.moveItem('${type}', ${index}, 1, event)" ${isLast ? 'disabled' : ''} class="p-1.5 ${isLast ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100'} rounded">${App.getIconHTML('chevron-down', 20)}</button></div>`;
             },
@@ -604,7 +617,6 @@
             renderCategorySelectLg: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`; },
             renderAccountSelect: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}</select>`; },
 
-            // --- メイン描画 ---
             render: function() {
                 App.calculateTotals();
                 const appDiv = document.getElementById('app');
@@ -614,7 +626,6 @@
                     <div class="max-w-6xl mx-auto space-y-6 p-4 md:p-8">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                             <div class="flex items-center gap-3">${App.getIconHTML('calculator', 32, 'text-indigo-600')}<h1 class="text-2xl font-bold text-gray-800">毎月の支払い管理</h1></div>
-                            <!-- ★ メインタブに特別支出とメモを追加 -->
                             <div class="flex bg-white rounded-lg shadow-sm border p-1 overflow-x-auto hide-scrollbar">
                                 <button onclick="App.setTab('dashboard')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('wallet', 20)} ダッシュボード</button>
                                 <button onclick="App.setTab('cashflow')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'cashflow' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('layout-dashboard', 20)} キャッシュフロー</button>
@@ -628,8 +639,8 @@
 
                 if (App.state.activeTab === 'dashboard') html += App.renderDashboard();
                 if (App.state.activeTab === 'cashflow') html += App.renderCashflow();
-                if (App.state.activeTab === 'special') html += App.renderSpecialPayments(); // ★ 新機能
-                if (App.state.activeTab === 'memos') html += App.renderMemos(); // ★ 新機能
+                if (App.state.activeTab === 'special') html += App.renderSpecialPayments();
+                if (App.state.activeTab === 'memos') html += App.renderMemos();
                 if (App.state.activeTab === 'history') html += App.renderHistory();
                 if (App.state.activeTab === 'settings') html += App.renderSettings();
 
@@ -639,7 +650,6 @@
                 appDiv.innerHTML = html;
             },
 
-            // --- サブ描画群 ---
             renderDashboard: function() {
                 const s = App.state;
                 let html = `
@@ -665,7 +675,7 @@
                     <div class="rounded-2xl p-5 shadow-sm border bg-blue-50/50 border-blue-100">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-lg font-bold flex items-center gap-2 text-blue-700">${App.getIconHTML('building-2', 24)} 口座残高</h3>
-                            <div class="text-right"><span class="text-xs text-blue-600 font-bold block">合計</span><span class="font-black text-xl text-blue-800">${App.formatCurrency(App.totals.totalAccountsNum)}</span></div>
+                            <div class="text-right"><span class="text-xs text-blue-600 font-bold block mb-1">口座合計</span><span class="font-black text-xl text-blue-800">${App.formatCurrency(App.totals.totalAccountsNum)}</span></div>
                         </div>
                         <div class="space-y-3 mb-4">
                 `;
@@ -680,9 +690,9 @@
                         `;
                     } else {
                         const relPays = s.payments.filter(p => p.accountId === item.id);
-                        const activeOut = relPays.filter(p => !p.isDone).reduce((sum, p) => sum + App.calcAmount(p.amount), 0);
+                        const totalOut = relPays.filter(p => !p.isDone).reduce((sum, p) => sum + App.calcAmount(p.amount), 0);
                         const incAmt = item.isIncomingDone ? 0 : App.calcAmount(item.incomingAmount);
-                        const expectedBal = App.calcAmount(item.amount) + incAmt - activeOut;
+                        const expectedBal = App.calcAmount(item.amount) + incAmt - totalOut;
                         const isShort = expectedBal < 0;
 
                         html += `
@@ -699,8 +709,8 @@
                                     </div>
                                     ${item.memo ? `<div class="text-[10px] text-gray-400 mb-2 truncate">${App.getIconHTML('message-square', 10)} ${escapeHTML(item.memo)}</div>` : ''}
                                     <div class="flex justify-between items-end gap-2">
-                                        <div class="flex-1"><span class="text-[10px] text-gray-500 block">残高</span>${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}${App.calcAmount(item.incomingAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isIncomingDone ? 'text-gray-400 line-through font-normal' : 'text-emerald-600'}">+${App.getDisplayAmountHTML(item.incomingAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}</div>
-                                        ${(activeOut > 0 || incAmt > 0) ? `<div class="flex-1 text-right pl-2 border-l border-gray-100"><span class="text-[10px] text-gray-500 block">引落後予想</span><span class="font-bold text-sm ${isShort ? 'text-red-600' : 'text-emerald-600'}">${App.formatCurrency(expectedBal)}</span></div>` : ''}
+                                        <div class="flex-1 min-w-0"><span class="text-[11px] text-gray-500 font-bold uppercase block mb-0.5">現在残高</span><span class="font-bold text-xl text-gray-800 break-words">${formatCurrency(item.amount)}</span>${App.calcAmount(item.incomingAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isIncomingDone ? 'text-gray-400 line-through font-normal' : 'text-emerald-600'}">+${App.getDisplayAmountHTML(item.incomingAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}</div>
+                                        ${(totalOut > 0 || incAmt > 0) ? `<div class="flex-1 text-right pl-2 border-l border-gray-100 min-w-0"><span class="text-[11px] text-gray-500 font-bold uppercase block mb-0.5">引落後予想</span><span class="font-bold text-xl break-words ${isShort ? 'text-red-600' : 'text-emerald-600'}">${isShort ? App.getIconHTML('alert-triangle', 14, 'inline mr-1 mb-0.5') : ''}${App.formatCurrency(expectedBal)}</span></div>` : ''}
                                     </div>
                                 </div>
                             </div>
@@ -709,9 +719,12 @@
                 });
                 html += `
                         </div>
-                        <form onsubmit="App.addAccount(event, this)" class="bg-white p-3 rounded-lg border shadow-sm space-y-2">
-                            <div class="flex gap-2"><input name="accName" type="text" placeholder="口座名" required class="flex-1 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-300"/><input name="accAmount" type="text" placeholder="現在残高 (数式OK)" class="w-24 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-300"/></div>
-                            <div class="flex gap-2"><input name="accIncoming" type="text" placeholder="入金予定" class="w-24 px-2 py-1.5 text-sm border rounded bg-emerald-50 focus:ring-1 focus:ring-emerald-300"/><input name="accMemo" type="text" placeholder="メモ" class="flex-1 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-300"/><button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-sm font-bold rounded hover:bg-blue-700">追加</button></div>
+                        <form onsubmit="App.addAccount(event, this)" class="bg-white p-3 rounded-lg border shadow-sm flex flex-col sm:flex-row gap-2">
+                            <input name="accName" type="text" placeholder="口座名" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"/>
+                            <div class="flex gap-2 w-full sm:w-auto">
+                                <input name="accAmount" type="number" placeholder="現在の金額" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"/>
+                                <button type="submit" class="px-4 py-2 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600 transition-colors flex items-center justify-center gap-1 shrink-0">${App.getIconHTML('plus', 18)} 追加</button>
+                            </div>
                         </form>
                     </div>
                 `;
@@ -720,7 +733,7 @@
                     <div class="rounded-2xl p-5 shadow-sm border bg-amber-50/50 border-amber-100">
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="text-lg font-bold flex items-center gap-2 text-amber-700">${App.getIconHTML('payments', 24)} 手元現金</h3>
-                            <div class="text-right"><span class="text-xs text-amber-600 font-bold block">合計</span><span class="font-black text-xl text-amber-800">${App.formatCurrency(App.totals.totalWalletsNum)}</span></div>
+                            <div class="text-right"><span class="text-xs text-amber-600 font-bold block mb-1">合計</span><span class="font-black text-xl text-amber-800">${App.formatCurrency(App.totals.totalWalletsNum)}</span></div>
                         </div>
                         <div class="space-y-3 mb-4">
                 `;
@@ -736,6 +749,7 @@
                     } else {
                         const activeOut = item.isOutgoDone ? 0 : App.calcAmount(item.outgoAmount);
                         const expectedBal = App.calcAmount(item.amount) - activeOut;
+                        const isShort = expectedBal < 0;
                         html += `
                             <div class="bg-white rounded-lg p-3 shadow-sm border border-gray-100 flex hover:shadow-md transition-all">
                                 ${App.renderSortButtons('wallet', index, index === 0, index === s.wallets.length - 1)}
@@ -751,7 +765,7 @@
                                     ${item.memo ? `<div class="text-[10px] text-gray-400 mb-2 truncate">${App.getIconHTML('message-square', 10)} ${escapeHTML(item.memo)}</div>` : ''}
                                     <div class="flex justify-between items-end gap-2">
                                         <div class="flex-1"><span class="text-[10px] text-gray-500 block">残高</span>${App.getDisplayAmountHTML(item.amount, "items-start text-sm text-gray-800")}${App.calcAmount(item.outgoAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isOutgoDone ? 'text-gray-400 line-through font-normal' : 'text-rose-600'}">-${App.getDisplayAmountHTML(item.outgoAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}</div>
-                                        ${activeOut > 0 ? `<div class="flex-1 text-right pl-2 border-l border-gray-100"><span class="text-[10px] text-gray-500 block">消費後予想</span><span class="font-bold text-sm ${expectedBal < 0 ? 'text-red-600' : 'text-amber-600'}">${App.formatCurrency(expectedBal)}</span></div>` : ''}
+                                        ${activeOut > 0 ? `<div class="flex-1 text-right pl-2 border-l border-gray-100"><span class="text-[10px] text-gray-500 block">消費後予想</span><span class="font-bold text-sm ${isShort ? 'text-red-600' : 'text-amber-600'}">${App.formatCurrency(expectedBal)}</span></div>` : ''}
                                     </div>
                                 </div>
                             </div>
@@ -760,10 +774,12 @@
                 });
                 html += `
                         </div>
-                        <form onsubmit="App.addWallet(event, this)" class="bg-white p-3 rounded-lg border shadow-sm space-y-2">
-                            <div class="flex gap-2"><input name="walName" type="text" placeholder="手元現金名" required class="flex-1 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-amber-300"/><input name="walAmount" type="text" placeholder="現在残高 (数式OK)" class="w-24 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-amber-300"/></div>
-                            <div class="flex gap-2"><input name="walOutgo" type="text" placeholder="消費予定" class="w-24 px-2 py-1.5 text-sm border rounded bg-rose-50 focus:ring-1 focus:ring-rose-300"/><input name="walMemo" type="text" placeholder="メモ" class="flex-1 px-2 py-1.5 text-sm border rounded focus:ring-1 focus:ring-amber-300"/></div>
-                            <div class="flex justify-between items-center"><label class="text-[11px] font-bold text-amber-800 flex items-center gap-1"><input name="walIsFixed" type="checkbox" class="rounded"/>毎月固定</label><button type="submit" class="px-4 py-1.5 bg-amber-500 text-white text-sm font-bold rounded hover:bg-amber-600">追加</button></div>
+                        <form onsubmit="App.addWallet(event, this)" class="bg-white p-3 rounded-lg border shadow-sm flex flex-col sm:flex-row gap-2">
+                            <input name="walName" type="text" placeholder="手元現金名" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200"/>
+                            <div class="flex gap-2 w-full sm:w-auto">
+                                <input name="walAmount" type="number" placeholder="現在の金額" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200"/>
+                                <button type="submit" class="px-4 py-2 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600 flex items-center justify-center gap-1 shrink-0 transition-colors">${App.getIconHTML('plus', 18)} 追加</button>
+                            </div>
                         </form>
                     </div>
                 </div>`;
@@ -773,7 +789,7 @@
             renderIncomes: function() {
                 const s = App.state;
                 let html = `
-                    <div class="rounded-2xl p-5 shadow-sm border bg-emerald-50/50 border-emerald-100 animate-fade-in max-w-3xl mx-auto">
+                    <div class="rounded-2xl p-5 shadow-sm border bg-emerald-50/30 border-emerald-100 animate-fade-in max-w-3xl mx-auto">
                         <div class="flex items-start sm:items-center justify-between mb-4 gap-2 flex-wrap">
                             <h3 class="text-lg font-bold flex items-center gap-2 text-emerald-600 shrink-0">${App.getIconHTML('arrow-down-to-line', 24)}入金・預かり予定</h3>
                             <div class="text-right">
@@ -814,10 +830,12 @@
                 });
                 html += `
                         </div>
-                        <form onsubmit="App.addIncome(event, this)" class="bg-white p-4 rounded-xl border shadow-sm space-y-3">
-                            <div class="flex gap-2"><input name="incName" type="text" placeholder="入金項目名" required class="flex-1 px-3 py-2 text-sm border-lg focus:ring-2 focus:ring-emerald-300"/><input name="incAmount" type="text" placeholder="金額 (数式OK)" class="w-28 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300"/></div>
-                            <div class="flex gap-2"><input name="incMemo" type="text" placeholder="メモ" class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-emerald-300"/><button type="submit" class="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700">追加</button></div>
-                            <label class="flex items-center gap-2 text-xs font-bold text-gray-600"><input name="incIsFixed" type="checkbox" class="rounded text-emerald-600 w-4 h-4"/>毎月固定の予定にする</label>
+                        <form onsubmit="App.addIncome(event, this)" class="bg-white p-3 rounded-xl border shadow-sm flex flex-col sm:flex-row gap-2">
+                            <input name="incName" type="text" placeholder="項目名" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200"/>
+                            <div class="flex gap-2 w-full sm:w-auto">
+                                <input name="incAmount" type="number" placeholder="金額" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200"/>
+                                <button type="submit" class="px-4 py-2 bg-emerald-500 text-white font-bold rounded-lg hover:bg-emerald-600 flex items-center justify-center shrink-0 transition-colors">${App.getIconHTML('plus', 18)}</button>
+                            </div>
                         </form>
                     </div>
                 `;
@@ -828,7 +846,6 @@
                 const s = App.state;
                 let html = `<div class="animate-fade-in max-w-4xl mx-auto space-y-4">`;
                 
-                // カテゴリ別集計
                 html += `<div class="grid grid-cols-2 md:grid-cols-4 gap-3">`;
                 Object.entries(CAT_LABELS).forEach(([key, data]) => {
                     html += `
@@ -871,7 +888,6 @@
                         const linkedAccount = s.accounts.find(a => a.id === item.accountId);
                         const itemCat = CAT_LABELS[item.category] || SAFE_CAT;
                         
-                        // ★ 新機能：ローンの終了月表示
                         const endDateBadge = item.endDate ? `<span class="border border-rose-300 bg-rose-50 text-rose-600 px-1.5 py-0.5 rounded flex items-center gap-1 shadow-sm"><span class="material-symbols-outlined text-[12px]">calendar_month</span>${item.endDate.replace('-','年')}月まで</span>` : '';
 
                         html += `
@@ -887,7 +903,7 @@
                                             </div>
                                             <div class="flex flex-wrap items-center gap-2 text-[10px] text-gray-500 mt-1.5">
                                                 ${endDateBadge}
-                                                ${item.dueDate ? `<span class="bg-gray-50 border px-1.5 py-0.5 rounded flex items-center gap-1">${App.getIconHTML('calendar', 12, 'text-gray-400')} ${item.dueDate}日引落</span>` : ''}
+                                                ${item.dueDate ? `<span class="bg-gray-50 border px-1.5 py-0.5 rounded flex items-center gap-1">${App.getIconHTML('calendar', 12, 'text-rose-400')} ${item.dueDate}日引落</span>` : ''}
                                                 ${linkedAccount ? `<span class="bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded flex items-center gap-1 max-w-[100px] truncate">${App.getIconHTML('building-2', 12, 'shrink-0')}<span class="truncate">${escapeHTML(linkedAccount.name)}</span></span>` : '<span class="text-gray-400">口座未設定</span>'}
                                             </div>
                                             ${item.memo ? `<div class="text-[10px] text-gray-400 mt-1 flex items-start gap-1">${App.getIconHTML('message-square', 14, 'shrink-0 mt-0.5')} <span class="truncate">${escapeHTML(item.memo)}</span></div>` : ''}
@@ -963,28 +979,31 @@
                     }
                 });
                 
-                // 支払い追加フォームにも終了月を追加
                 html += `
                         </div>
-                        <form onsubmit="App.addPayment(event, this)" class="bg-white p-4 rounded-xl border shadow-sm space-y-3">
-                            <div class="flex gap-2"><input name="payName" type="text" placeholder="項目名 (例: 楽天カード)" required class="flex-1 px-3 py-2 text-sm border-lg focus:ring-2 focus:ring-rose-200"/><input name="payAmount" type="text" placeholder="請求総額 (数式OK)" class="w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200"/></div>
-                            <div class="flex gap-2 bg-gray-50 p-2 rounded-lg">
-                                <select name="payCat" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k,d])=>`<option value="${k}">${d.label}</option>`).join('')}</select>
-                                <select name="payAccountId" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${s.accounts.map(a=>`<option value="${a.id}">${escapeHTML(a.name)}</option>`).join('')}</select>
-                                <input name="payDueDate" type="number" min="1" max="31" placeholder="日" class="w-16 px-2 py-1.5 text-sm border rounded bg-white"/>
+                        <form onsubmit="App.addPayment(event, this)" class="bg-white p-4 rounded-xl border shadow-sm flex flex-col gap-3">
+                            <p className="text-sm font-bold text-gray-700 flex items-center gap-1">${App.getIconHTML('plus', 16, 'text-rose-500')} 新しい支払いを追加</p>
+                            <div class="flex flex-col sm:flex-row gap-3">
+                                <input name="payName" type="text" placeholder="項目名 (例: 楽天カード)" required class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200 outline-none w-full"/>
+                                <input name="payAmount" type="text" placeholder="請求総額 (数式OK)" required class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200 outline-none w-full sm:max-w-[150px]"/>
                             </div>
-                            <div class="flex gap-2 items-center">
-                                <input name="payMemo" type="text" placeholder="メモ（任意）" class="flex-1 px-3 py-2 text-sm border rounded-lg bg-gray-50"/>
-                                <div class="flex items-center gap-1 border bg-white rounded px-2"><span class="text-[10px] font-bold text-gray-500 whitespace-nowrap">終了月:</span><input name="payEndDate" type="month" class="w-28 py-2 text-[10px] outline-none" /></div>
+                            <div class="bg-gray-50 p-3 rounded-lg space-y-3">
+                                <div class="flex flex-col sm:flex-row gap-3 text-sm">
+                                    <label class="flex items-center gap-2 flex-1 w-full"><span class="text-gray-600 font-medium w-16 shrink-0">引落口座</span><select name="payAccountId" class="flex-1 px-2 py-1.5 border rounded-md bg-white w-full"><option value="">(未設定)</option>${s.accounts.map(a=>`<option value="${a.id}">${escapeHTML(a.name)}</option>`).join('')}</select></label>
+                                    <label class="flex items-center gap-2 sm:w-auto w-full"><span class="text-gray-600 font-medium shrink-0 sm:w-auto w-16">引落日</span><input name="payDueDate" type="number" min="1" max="31" placeholder="日" class="flex-1 sm:w-20 px-2 py-1.5 border rounded-md bg-white"/></label>
+                                </div>
                             </div>
-                            <button type="submit" class="w-full py-2 bg-rose-500 text-white font-bold rounded-lg hover:bg-rose-600 mt-2">支払いを追加</button>
+                            <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                                <input name="payMemo" type="text" placeholder="メモ（任意）" class="flex-1 px-3 py-2 text-sm border rounded-lg bg-gray-50 w-full"/>
+                                <div class="flex items-center gap-1 border bg-white rounded-lg px-2 py-1 w-full sm:w-auto"><span class="text-[10px] font-bold text-gray-500 whitespace-nowrap">終了月:</span><input name="payEndDate" type="month" class="w-full sm:w-32 py-1 text-sm outline-none" /></div>
+                            </div>
+                            <button type="submit" class="w-full flex justify-center items-center gap-1 py-2.5 text-white font-bold rounded-lg bg-rose-500 hover:bg-rose-600 shadow-sm transition-colors">追加する</button>
                         </form>
                     </div>
                 </div>`;
                 return html;
             },
 
-            // --- ★ 新機能：特別支出タブ ---
             renderSpecialPayments: function() {
                 const s = App.state;
                 const tot = App.totals;
@@ -1017,22 +1036,23 @@
                 if (s.specialPayments.length === 0) {
                     html += `<p class="text-sm text-gray-400 text-center py-4">登録された特別支出はありません</p>`;
                 } else {
-                    // 日付順にソート
                     const sorted = [...s.specialPayments].sort((a,b) => (a.targetMonth || '9999-99').localeCompare(b.targetMonth || '9999-99'));
                     sorted.forEach(item => {
                         if (s.editMode && s.editMode.type === 'special' && s.editMode.id === item.id) {
                             html += `
                                 <form onsubmit="App.saveEdit(event, 'special', ${item.id})" class="bg-indigo-50 rounded-xl border border-indigo-200 p-4 space-y-3 shadow-inner">
-                                    <div class="flex gap-2"><input name="name" type="text" value="${escapeHTML(item.name)}" class="flex-1 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-indigo-300" placeholder="項目名" required/><input name="amount" type="text" value="${escapeHTML(item.amount)}" class="w-28 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-indigo-300" placeholder="目標金額" required/></div>
-                                    <div class="flex gap-2 items-center">
-                                        <div class="flex items-center gap-1 border bg-white rounded px-2"><span class="text-xs font-bold text-gray-500 whitespace-nowrap">支払月:</span><input name="targetMonth" type="month" value="${item.targetMonth||''}" class="w-32 py-2 text-sm outline-none" required/></div>
-                                        <input name="memo" type="text" value="${escapeHTML(item.memo)}" class="flex-1 px-3 py-2 text-sm border rounded" placeholder="メモ"/>
+                                    <div class="flex flex-col sm:flex-row gap-2"><input name="name" type="text" value="${escapeHTML(item.name)}" class="flex-1 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-indigo-300" placeholder="項目名" required/><input name="amount" type="text" value="${escapeHTML(item.amount)}" class="w-full sm:w-32 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-indigo-300" placeholder="目標金額" required/></div>
+                                    <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                                        <div class="flex items-center gap-1 border bg-white rounded-lg px-2 flex-1 sm:flex-none"><span class="text-xs font-bold text-gray-500 whitespace-nowrap">支払月:</span><input name="targetMonth" type="month" value="${item.targetMonth||''}" class="flex-1 sm:w-32 py-2 text-sm outline-none" required/></div>
+                                        <div class="flex gap-2 flex-1 w-full">
+                                            <input name="memo" type="text" value="${escapeHTML(item.memo)}" class="flex-1 px-3 py-2 text-sm border rounded-lg min-w-0" placeholder="メモ"/>
+                                            <button type="submit" class="px-6 py-2 text-sm bg-indigo-600 text-white font-bold rounded-lg shrink-0">保存</button>
+                                        </div>
                                     </div>
-                                    <div class="flex justify-end gap-2"><button type="button" onclick="App.cancelEdit()" class="px-4 py-2 text-sm bg-white border rounded font-bold text-gray-600">キャンセル</button><button type="submit" class="px-4 py-2 text-sm bg-indigo-600 text-white font-bold rounded">保存</button></div>
+                                    <div class="flex justify-end"><button type="button" onclick="App.cancelEdit()" class="px-4 py-2 text-sm bg-white border rounded font-bold text-gray-600">キャンセル</button></div>
                                 </form>
                             `;
                         } else {
-                            // 残り月数計算
                             let monthsLeftText = '未定';
                             let monthlyAmt = 0;
                             if (item.targetMonth) {
@@ -1051,9 +1071,9 @@
                                             <span class="font-bold text-gray-800 text-lg ${item.isDone ? 'line-through' : ''}">${escapeHTML(item.name)}</span>
                                             ${item.targetMonth ? `<span class="bg-indigo-100 text-indigo-800 text-xs px-2 py-0.5 rounded-full font-bold flex items-center gap-1">${App.getIconHTML('event', 14)}${item.targetMonth.replace('-','年')}月</span>` : ''}
                                         </div>
-                                        <div class="flex items-end gap-4 text-sm">
+                                        <div class="flex flex-wrap items-end gap-x-4 gap-y-1 text-sm">
                                             <div><span class="text-xs text-gray-500 block mb-0.5">目標金額</span><span class="font-black text-gray-700">${App.formatCurrency(item.amount)}</span></div>
-                                            ${!item.isDone && item.targetMonth ? `<div><span class="text-xs text-gray-500 block mb-0.5">積立ペース (${monthsLeftText})</span><span class="font-bold text-rose-500">${App.formatCurrency(monthlyAmt)} /月</span></div>` : ''}
+                                            ${!item.isDone && item.targetMonth ? `<div><span class="text-xs text-gray-500 block mb-0.5">単独積立の目安 (${monthsLeftText})</span><span class="font-bold text-rose-500">${App.formatCurrency(monthlyAmt)} /月</span></div>` : ''}
                                         </div>
                                         ${item.memo ? `<div class="text-[10px] text-gray-400 mt-2 flex items-start gap-1">${App.getIconHTML('message-square', 14, 'shrink-0 mt-0.5')} <span class="truncate">${escapeHTML(item.memo)}</span></div>` : ''}
                                     </div>
@@ -1074,11 +1094,16 @@
                             </div>
                             <form onsubmit="App.addSpecialPayment(event, this)" class="bg-gray-50 p-4 rounded-xl border border-gray-200 border-dashed space-y-3">
                                 <h4 class="text-sm font-bold text-gray-600 flex items-center gap-1">${App.getIconHTML('add_circle', 18)} 新しい特別支出を追加</h4>
-                                <div class="flex gap-2"><input name="spName" type="text" placeholder="項目名 (例: 固定資産税)" required class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-200"/><input name="spAmount" type="text" placeholder="目標金額" required class="w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-200"/></div>
-                                <div class="flex gap-2 items-center">
-                                    <div class="flex items-center gap-1 border bg-white rounded-lg px-2"><span class="text-xs font-bold text-gray-500 whitespace-nowrap">支払月:</span><input name="spMonth" type="month" class="w-32 py-2 text-sm outline-none" required/></div>
-                                    <input name="spMemo" type="text" placeholder="メモ" class="flex-1 px-3 py-2 text-sm border rounded-lg"/>
-                                    <button type="submit" class="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700">追加</button>
+                                <div class="flex flex-col sm:flex-row gap-2">
+                                    <input name="spName" type="text" placeholder="項目名 (例: 固定資産税)" required class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-200"/>
+                                    <input name="spAmount" type="text" placeholder="目標金額" required class="w-full sm:w-32 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-200"/>
+                                </div>
+                                <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                                    <div class="flex items-center gap-1 border bg-white rounded-lg px-2 flex-1 sm:flex-none"><span class="text-xs font-bold text-gray-500 whitespace-nowrap">支払月:</span><input name="spMonth" type="month" class="flex-1 sm:w-32 py-2 text-sm outline-none" required/></div>
+                                    <div class="flex gap-2 flex-1 w-full">
+                                        <input name="spMemo" type="text" placeholder="メモ" class="flex-1 px-3 py-2 text-sm border rounded-lg min-w-0"/>
+                                        <button type="submit" class="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 shrink-0">追加</button>
+                                    </div>
                                 </div>
                             </form>
                         </div>
@@ -1087,7 +1112,6 @@
                 return html;
             },
 
-            // --- ★ 新機能：予定・メモタブ ---
             renderMemos: function() {
                 const s = App.state;
                 let html = `
@@ -1144,7 +1168,7 @@
                                     <div class="flex items-center gap-2 border bg-white rounded-lg px-3 py-2"><span class="text-xs font-bold text-gray-500">予定日:</span><input name="mDate" type="date" class="flex-1 text-sm outline-none bg-transparent"/></div>
                                 </div>
                                 <textarea name="mContent" rows="2" placeholder="メモの内容を自由に記述してください" class="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-orange-200 mb-3"></textarea>
-                                <div class="text-right"><button type="submit" class="px-8 py-2 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 shadow-sm">追加する</button></div>
+                                <div class="text-right"><button type="submit" class="w-full sm:w-auto px-8 py-2 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 shadow-sm">追加する</button></div>
                             </form>
                         </div>
                     </div>
@@ -1188,7 +1212,7 @@
                             <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 gap-4 pb-4 border-b border-gray-100">
                                 <div>
                                     <h2 class="text-xl font-bold text-gray-800">月次推移グラフ</h2>
-                                    <p class="text-sm text-gray-500 mt-1">棒をタップすると下に詳細な内訳が表示されます。</p>
+                                    <p class="text-sm text-gray-500 mt-1">棒をタップすると下に詳細が表示されます。</p>
                                 </div>
                                 <div class="flex flex-wrap items-center gap-2 bg-indigo-50 p-2 rounded-xl border border-indigo-100 w-full lg:w-auto">
                                     <input type="month" id="manualHistoryMonth" value="${s.manualHistoryMonth}" onchange="App.state.manualHistoryMonth = this.value" class="text-sm px-2 py-1.5 border rounded bg-white font-bold text-indigo-900" />
@@ -1229,7 +1253,7 @@
                         }
                     }
                     
-                    html += `<div class="relative h-[280px] mt-2 flex">`;
+                    html += `<div class="relative h-[250px] mt-2 flex">`;
                     html += `<div class="w-16 shrink-0 flex flex-col justify-between items-end pr-2 pb-8 text-[10px] text-gray-400 font-mono z-10 bg-white border-r border-gray-100">${yAxisValues.map(val => `<span>${val === 0 ? '0' : App.formatCurrency(val).replace('￥', '¥').replace('.00', '')}</span>`).join('')}</div>`;
                     html += `<div class="flex-1 overflow-x-auto hide-scrollbar relative border-b-2 border-gray-200 pb-8"><div class="absolute inset-0 flex flex-col justify-between pointer-events-none z-0 pb-8 px-2 min-w-full">${[1, 2, 3, 4, 5].map(() => `<div class="w-full border-t border-gray-200 border-dashed"></div>`).join('')}</div><div class="flex items-end justify-around gap-6 h-full px-4 min-w-max relative z-10"><svg class="absolute inset-0 w-full h-full pointer-events-none z-0 overflow-visible" preserveAspectRatio="none">${svgLines}</svg>`;
                     
@@ -1244,14 +1268,18 @@
                         
                         let incBarsHTML = '';
                         const incDetails = data.incomeDetails || (incomeValue > 0 ? [{name: '過去の収入', amount: incomeValue}] : []);
-                        if (incDetails.length === 0) {
+                        if (s.chartMode === 'all') {
                             incBarsHTML = `<div class="w-full h-full bg-emerald-300 rounded-t-[2px]"></div>`;
                         } else {
-                            incDetails.forEach(d => {
-                                const h = (d.amount / incomeValue) * 100;
-                                const color = App.getColorForName(d.name);
-                                incBarsHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
-                            });
+                            if (incDetails.length === 0) {
+                                incBarsHTML = `<div class="w-full h-full bg-emerald-300 rounded-t-[2px]"></div>`;
+                            } else {
+                                incDetails.forEach(d => {
+                                    const h = (d.amount / incomeValue) * 100;
+                                    const color = App.getColorForName(d.name);
+                                    incBarsHTML += `<div style="height: ${h}%;" class="${color} w-full rounded-t-[1px]"></div>`;
+                                });
+                            }
                         }
 
                         let payBarsCatHTML = '';
@@ -1323,7 +1351,6 @@
                                     
                                     <div class="w-full h-full flex justify-center items-end relative transition-all duration-300 ${isSelected ? 'opacity-100 drop-shadow-md scale-[1.15]' : (s.selectedHistoryId ? 'opacity-40 grayscale-[50%]' : 'opacity-100 hover:opacity-80')}">
                                         ${visibleBars}
-                                        <!-- 月末残高マーカー -->
                                         <div class="absolute w-10 h-1 z-30 ${isShort ? 'bg-red-500' : 'bg-emerald-500'} rounded-full shadow-sm" style="bottom: ${Math.max(Math.min((balanceValue / maxVal) * 100, 100), -2)}%; left:50%; transform:translateX(-50%);"></div>
                                     </div>
                                     <span class="text-[10px] ${isSelected ? 'text-indigo-600 font-black' : 'text-gray-500 font-bold'} mt-2 whitespace-nowrap absolute -bottom-6">${escapeHTML(data.label)}</span>
@@ -1335,7 +1362,15 @@
                 }
                 
                 let legendHTML = '';
-                if (s.chartMode === 'all' || s.chartMode === 'pay_cat') {
+                if (s.chartMode === 'all') {
+                    legendHTML = `
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-emerald-300 rounded-sm"></div>収入合計</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-purple-400 rounded-sm"></div>ローン</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></div>固定費</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-rose-400 rounded-sm"></div>変動費</span>
+                        <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-emerald-400 rounded-sm"></div>投資</span>
+                    `;
+                } else if (s.chartMode === 'pay_cat') {
                     legendHTML = `
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-purple-400 rounded-sm"></div>ローン</span>
                         <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 bg-indigo-400 rounded-sm"></div>固定費</span>
