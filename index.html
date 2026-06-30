@@ -247,7 +247,6 @@
                     }
                 });
 
-                // ★ 特別支出の当月分合算と、積立の平準化計算アルゴリズム
                 const currentMonth = App.getCurrentMonthStr();
                 let currentMonthSpecialAmt = 0;
                 let totalSpecialAmt = 0;
@@ -264,13 +263,11 @@
                         const amt = App.calcAmount(sp.amount);
                         totalSpecialAmt += amt;
                         
-                        // 当月分はキャッシュフローに合算
                         if (sp.targetMonth === currentMonth) {
                             currentMonthSpecialAmt += amt;
                             activePayments += amt;
                         }
 
-                        // 積立計算のための情報収集
                         if (sp.targetMonth) {
                             const [ty, tm] = sp.targetMonth.split('-');
                             let monthsLeft = (parseInt(ty) - curY) * 12 + (parseInt(tm) - curM) + 1;
@@ -280,7 +277,6 @@
                     }
                 });
 
-                // ★ 平準化計算: 残り月数が少ない順に並べ、一番負担が大きい月を基準になだらかにする
                 upcomingSpecials.sort((a, b) => a.monthsLeft - b.monthsLeft);
                 let cumulativeAmt = 0;
                 upcomingSpecials.forEach(sp => {
@@ -608,7 +604,22 @@
                     App.state.confirmImportData = { accounts: nA, wallets: nW, incomes: nI, payments: nP, history: nH, specialPayments: nSP, memos: nM }; App.state.importMsg = { text: '', isError: false }; App.render();
                 } catch (e) { App.state.importMsg = { text: 'データの解析に失敗しました。ファイルが正しくない可能性があります。', isError: true }; App.render(); }
             },
-            executeImport: function() { const data = App.state.confirmImportData; if (!data) return; App.state.accounts = data.accounts; App.state.wallets = data.wallets; App.state.incomes = data.incomes; App.state.payments = data.payments; App.state.history = data.history; App.state.specialPayments = data.specialPayments || []; App.state.memos = data.memos || []; App.state.importData = ''; App.state.confirmImportData = null; App.state.showSuccessModal = true; App.saveData(); App.render(); },
+            executeImport: function() { 
+                const data = App.state.confirmImportData; 
+                if (!data) return; 
+                App.state.accounts = data.accounts; 
+                App.state.wallets = data.wallets; 
+                App.state.incomes = data.incomes; 
+                App.state.payments = data.payments; 
+                App.state.history = data.history; 
+                App.state.specialPayments = data.specialPayments || []; 
+                App.state.memos = data.memos || []; 
+                App.state.importData = ''; 
+                App.state.confirmImportData = null; 
+                App.state.showSuccessModal = true; 
+                App.saveData(); 
+                App.render();
+            },
 
             renderSortButtons: function(type, index, isFirst, isLast) {
                 return `<div class="flex flex-col mr-2 items-center justify-center shrink-0"><button type="button" onclick="App.moveItem('${type}', ${index}, -1, event)" ${isFirst ? 'disabled' : ''} class="p-1.5 ${isFirst ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100'} rounded">${App.getIconHTML('chevron-up', 20)}</button><button type="button" onclick="App.moveItem('${type}', ${index}, 1, event)" ${isLast ? 'disabled' : ''} class="p-1.5 ${isLast ? 'text-gray-200' : 'text-gray-400 hover:bg-gray-100'} rounded">${App.getIconHTML('chevron-down', 20)}</button></div>`;
@@ -617,39 +628,58 @@
             renderCategorySelectLg: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`; },
             renderAccountSelect: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}</select>`; },
 
+            // --- メイン描画（安全装置を追加） ---
             render: function() {
-                App.calculateTotals();
-                const appDiv = document.getElementById('app');
-                if (!appDiv) return;
+                try {
+                    App.calculateTotals();
+                    const appDiv = document.getElementById('app');
+                    if (!appDiv) return;
 
-                let html = `
-                    <div class="max-w-6xl mx-auto space-y-6 p-4 md:p-8">
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                            <div class="flex items-center gap-3">${App.getIconHTML('calculator', 32, 'text-indigo-600')}<h1 class="text-2xl font-bold text-gray-800">毎月の支払い管理</h1></div>
-                            <div class="flex bg-white rounded-lg shadow-sm border p-1 overflow-x-auto hide-scrollbar">
-                                <button onclick="App.setTab('dashboard')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('wallet', 20)} ダッシュボード</button>
-                                <button onclick="App.setTab('cashflow')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'cashflow' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('layout-dashboard', 20)} キャッシュフロー</button>
-                                <button onclick="App.setTab('special')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'special' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('savings', 20)} 特別支出(積立)</button>
-                                <button onclick="App.setTab('memos')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'memos' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('event_note', 20)} 予定・メモ</button>
-                                <button onclick="App.setTab('history')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'history' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('bar-chart-3', 20)} 推移グラフ</button>
-                                <button onclick="App.setTab('settings')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('settings', 20)} 設定</button>
+                    let html = `
+                        <div class="max-w-6xl mx-auto space-y-6 p-4 md:p-8">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                                <div class="flex items-center gap-3">${App.getIconHTML('calculator', 32, 'text-indigo-600')}<h1 class="text-2xl font-bold text-gray-800">毎月の支払い管理</h1></div>
+                                <div class="flex bg-white rounded-lg shadow-sm border p-1 overflow-x-auto hide-scrollbar">
+                                    <button onclick="App.setTab('dashboard')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('wallet', 20)} ダッシュボード</button>
+                                    <button onclick="App.setTab('cashflow')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'cashflow' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('layout-dashboard', 20)} キャッシュフロー</button>
+                                    <button onclick="App.setTab('special')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'special' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('savings', 20)} 特別支出(積立)</button>
+                                    <button onclick="App.setTab('memos')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'memos' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('event_note', 20)} 予定・メモ</button>
+                                    <button onclick="App.setTab('history')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'history' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('bar-chart-3', 20)} 推移グラフ</button>
+                                    <button onclick="App.setTab('settings')" class="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold whitespace-nowrap transition-colors ${App.state.activeTab === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50'}">${App.getIconHTML('settings', 20)} 設定</button>
+                                </div>
                             </div>
-                        </div>
-                `;
+                    `;
 
-                if (App.state.activeTab === 'dashboard') html += App.renderDashboard();
-                if (App.state.activeTab === 'cashflow') html += App.renderCashflow();
-                if (App.state.activeTab === 'special') html += App.renderSpecialPayments();
-                if (App.state.activeTab === 'memos') html += App.renderMemos();
-                if (App.state.activeTab === 'history') html += App.renderHistory();
-                if (App.state.activeTab === 'settings') html += App.renderSettings();
+                    if (App.state.activeTab === 'dashboard') html += App.renderDashboard();
+                    if (App.state.activeTab === 'cashflow') html += App.renderCashflow();
+                    if (App.state.activeTab === 'special') html += App.renderSpecialPayments();
+                    if (App.state.activeTab === 'memos') html += App.renderMemos();
+                    if (App.state.activeTab === 'history') html += App.renderHistory();
+                    if (App.state.activeTab === 'settings') html += App.renderSettings();
 
-                html += `</div>`; 
-                html += App.renderModals();
+                    html += `</div>`; 
+                    html += App.renderModals();
 
-                appDiv.innerHTML = html;
+                    appDiv.innerHTML = html;
+                } catch (error) {
+                    console.error("描画エラー:", error);
+                    const appDiv = document.getElementById('app');
+                    if (appDiv) {
+                        appDiv.innerHTML = `
+                            <div class="p-8 text-center bg-red-50 text-red-700 min-h-screen flex flex-col items-center justify-center">
+                                <span class="material-symbols-outlined text-6xl mb-4">error</span>
+                                <h1 class="text-2xl font-bold mb-4">画面の表示中にエラーが発生しました</h1>
+                                <p class="mb-4 text-sm font-bold">画面が真っ白になるのを防ぐため、この画面を表示しています。</p>
+                                <p class="mb-8 text-xs bg-white p-4 rounded border border-red-200 text-left w-full max-w-md overflow-auto text-red-500">${escapeHTML(error.message)}</p>
+                                <button onclick="window.location.reload()" class="px-6 py-3 bg-red-600 text-white rounded-lg font-bold mb-4 shadow-md">画面を再読み込みして直す</button>
+                                <button onclick="if(window.confirm('データを全て消去して初期状態に戻しますか？(復元できません)')) { localStorage.clear(); window.location.reload(); }" class="px-4 py-2 bg-gray-400 text-white rounded-lg font-bold text-xs">データを初期化する</button>
+                            </div>
+                        `;
+                    }
+                }
             },
 
+            // --- サブ描画群 ---
             renderDashboard: function() {
                 const s = App.state;
                 let html = `
@@ -709,7 +739,7 @@
                                     </div>
                                     ${item.memo ? `<div class="text-[10px] text-gray-400 mb-2 truncate">${App.getIconHTML('message-square', 10)} ${escapeHTML(item.memo)}</div>` : ''}
                                     <div class="flex justify-between items-end gap-2">
-                                        <div class="flex-1 min-w-0"><span class="text-[11px] text-gray-500 font-bold uppercase block mb-0.5">現在残高</span><span class="font-bold text-xl text-gray-800 break-words">${formatCurrency(item.amount)}</span>${App.calcAmount(item.incomingAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isIncomingDone ? 'text-gray-400 line-through font-normal' : 'text-emerald-600'}">+${App.getDisplayAmountHTML(item.incomingAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}</div>
+                                        <div class="flex-1 min-w-0"><span class="text-[11px] text-gray-500 font-bold uppercase block mb-0.5">現在残高</span><span class="font-bold text-xl text-gray-800 break-words">${App.formatCurrency(item.amount)}</span>${App.calcAmount(item.incomingAmount) > 0 ? `<div class="text-[10px] font-bold mt-0.5 ${item.isIncomingDone ? 'text-gray-400 line-through font-normal' : 'text-emerald-600'}">+${App.getDisplayAmountHTML(item.incomingAmount, "inline-flex flex-row gap-1 items-baseline")}</div>` : ''}</div>
                                         ${(totalOut > 0 || incAmt > 0) ? `<div class="flex-1 text-right pl-2 border-l border-gray-100 min-w-0"><span class="text-[11px] text-gray-500 font-bold uppercase block mb-0.5">引落後予想</span><span class="font-bold text-xl break-words ${isShort ? 'text-red-600' : 'text-emerald-600'}">${isShort ? App.getIconHTML('alert-triangle', 14, 'inline mr-1 mb-0.5') : ''}${App.formatCurrency(expectedBal)}</span></div>` : ''}
                                     </div>
                                 </div>
@@ -903,7 +933,7 @@
                                             </div>
                                             <div class="flex flex-wrap items-center gap-2 text-[10px] text-gray-500 mt-1.5">
                                                 ${endDateBadge}
-                                                ${item.dueDate ? `<span class="bg-gray-50 border px-1.5 py-0.5 rounded flex items-center gap-1">${App.getIconHTML('calendar', 12, 'text-rose-400')} ${item.dueDate}日引落</span>` : ''}
+                                                ${item.dueDate ? `<span class="bg-gray-50 border px-1.5 py-0.5 rounded flex items-center gap-1">${App.getIconHTML('calendar', 12, 'text-gray-400')} ${item.dueDate}日引落</span>` : ''}
                                                 ${linkedAccount ? `<span class="bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded flex items-center gap-1 max-w-[100px] truncate">${App.getIconHTML('building-2', 12, 'shrink-0')}<span class="truncate">${escapeHTML(linkedAccount.name)}</span></span>` : '<span class="text-gray-400">口座未設定</span>'}
                                             </div>
                                             ${item.memo ? `<div class="text-[10px] text-gray-400 mt-1 flex items-start gap-1">${App.getIconHTML('message-square', 14, 'shrink-0 mt-0.5')} <span class="truncate">${escapeHTML(item.memo)}</span></div>` : ''}
@@ -982,7 +1012,7 @@
                 html += `
                         </div>
                         <form onsubmit="App.addPayment(event, this)" class="bg-white p-4 rounded-xl border shadow-sm flex flex-col gap-3">
-                            <p className="text-sm font-bold text-gray-700 flex items-center gap-1">${App.getIconHTML('plus', 16, 'text-rose-500')} 新しい支払いを追加</p>
+                            <p class="text-sm font-bold text-gray-700 flex items-center gap-1">${App.getIconHTML('plus', 16, 'text-rose-500')} 新しい支払いを追加</p>
                             <div class="flex flex-col sm:flex-row gap-3">
                                 <input name="payName" type="text" placeholder="項目名 (例: 楽天カード)" required class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200 outline-none w-full"/>
                                 <input name="payAmount" type="text" placeholder="請求総額 (数式OK)" required class="flex-1 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-rose-200 outline-none w-full sm:max-w-[150px]"/>
@@ -1044,24 +1074,19 @@
                                     <div class="flex flex-col sm:flex-row gap-2"><input name="name" type="text" value="${escapeHTML(item.name)}" class="flex-1 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-indigo-300" placeholder="項目名" required/><input name="amount" type="text" value="${escapeHTML(item.amount)}" class="w-full sm:w-32 px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-indigo-300" placeholder="目標金額" required/></div>
                                     <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                                         <div class="flex items-center gap-1 border bg-white rounded-lg px-2 flex-1 sm:flex-none"><span class="text-xs font-bold text-gray-500 whitespace-nowrap">支払月:</span><input name="targetMonth" type="month" value="${item.targetMonth||''}" class="flex-1 sm:w-32 py-2 text-sm outline-none" required/></div>
-                                        <div class="flex gap-2 flex-1 w-full">
-                                            <input name="memo" type="text" value="${escapeHTML(item.memo)}" class="flex-1 px-3 py-2 text-sm border rounded-lg min-w-0" placeholder="メモ"/>
-                                            <button type="submit" class="px-6 py-2 text-sm bg-indigo-600 text-white font-bold rounded-lg shrink-0">保存</button>
-                                        </div>
+                                        <input name="memo" type="text" value="${escapeHTML(item.memo)}" class="flex-1 px-3 py-2 text-sm border rounded min-w-0" placeholder="メモ"/>
                                     </div>
-                                    <div class="flex justify-end"><button type="button" onclick="App.cancelEdit()" class="px-4 py-2 text-sm bg-white border rounded font-bold text-gray-600">キャンセル</button></div>
+                                    <div class="flex justify-end gap-2"><button type="button" onclick="App.cancelEdit()" class="px-4 py-2 text-sm bg-white border rounded font-bold text-gray-600">キャンセル</button><button type="submit" class="px-4 py-2 text-sm bg-indigo-600 text-white font-bold rounded">保存</button></div>
                                 </form>
                             `;
                         } else {
                             let monthsLeftText = '未定';
-                            let monthlyAmt = 0;
                             if (item.targetMonth) {
                                 const curDate = new Date();
                                 const [ty, tm] = item.targetMonth.split('-');
                                 let ml = (parseInt(ty) - curDate.getFullYear()) * 12 + (parseInt(tm) - (curDate.getMonth() + 1)) + 1;
                                 if (ml < 1) ml = 1;
                                 monthsLeftText = `残り ${ml}ヶ月`;
-                                monthlyAmt = Math.ceil(App.calcAmount(item.amount) / ml);
                             }
 
                             html += `
@@ -1073,7 +1098,7 @@
                                         </div>
                                         <div class="flex flex-wrap items-end gap-x-4 gap-y-1 text-sm">
                                             <div><span class="text-xs text-gray-500 block mb-0.5">目標金額</span><span class="font-black text-gray-700">${App.formatCurrency(item.amount)}</span></div>
-                                            ${!item.isDone && item.targetMonth ? `<div><span class="text-xs text-gray-500 block mb-0.5">単独積立の目安 (${monthsLeftText})</span><span class="font-bold text-rose-500">${App.formatCurrency(monthlyAmt)} /月</span></div>` : ''}
+                                            ${!item.isDone && item.targetMonth ? `<div><span class="text-xs text-gray-500 block mb-0.5">期限</span><span class="font-bold text-rose-500">${monthsLeftText}</span></div>` : ''}
                                         </div>
                                         ${item.memo ? `<div class="text-[10px] text-gray-400 mt-2 flex items-start gap-1">${App.getIconHTML('message-square', 14, 'shrink-0 mt-0.5')} <span class="truncate">${escapeHTML(item.memo)}</span></div>` : ''}
                                     </div>
@@ -1174,34 +1199,6 @@
                     </div>
                 `;
                 return html;
-            },
-
-            renderCashflow: function() {
-                const tot = App.totals;
-                const isShort = tot.activeFinalBalance < 0;
-                return `
-                    <div class="bg-white rounded-2xl p-8 shadow-md border border-gray-100 animate-zoom-in max-w-5xl mx-auto">
-                        <h2 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2 pb-4 border-b border-gray-100">${App.getIconHTML('layout-dashboard', 24, 'text-indigo-600')} 今月の全体キャッシュフロー予想</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div class="p-6 bg-blue-50 rounded-2xl border border-blue-100 flex flex-col justify-between">
-                                <div><p class="text-sm text-blue-600 font-bold mb-1">確保している資金</p><p class="text-xs text-blue-400 mb-4">全口座・現金 ＋ 未済の入金総額</p></div>
-                                <p class="text-3xl font-black text-blue-800">${App.formatCurrency(tot.totalAccountsNum + tot.totalWalletsNum + tot.activeAccountIncomes + tot.remainingIncomes)}</p>
-                            </div>
-                            <div class="p-6 bg-rose-50 rounded-2xl border border-rose-100 flex flex-col justify-between">
-                                <div><p class="text-sm text-rose-600 font-bold mb-1">残りの支払い合計</p><p class="text-xs text-rose-400 mb-4">未済引落・消費 ＋ 当月の特別支出</p></div>
-                                <p class="text-3xl font-black text-rose-800">${App.formatCurrency(tot.activePayments + tot.activeWalletsOutgo)}</p>
-                            </div>
-                            <div class="p-6 rounded-2xl border-2 flex flex-col justify-between ${isShort ? 'bg-red-50 border-red-300 shadow-sm' : 'bg-emerald-50 border-emerald-300 shadow-emerald-100 shadow-lg'}">
-                                <div>
-                                    <p class="text-sm font-bold flex items-center gap-1.5 mb-1 ${isShort ? 'text-red-600' : 'text-emerald-700'}">${App.getIconHTML(isShort ? 'alert-circle' : 'check-circle-2', 24)} 差引予測残高</p>
-                                    <p class="text-xs mb-4 ${isShort ? 'text-red-400' : 'text-emerald-500'}">${isShort ? '資金がショートするリスクがあります' : '引き落とし後も資金は確保できています'}</p>
-                                </div>
-                                <p class="text-4xl font-black tracking-tight ${isShort ? 'text-red-700' : 'text-emerald-700'}">${App.formatCurrency(tot.activeFinalBalance)}</p>
-                            </div>
-                        </div>
-                        ${tot.currentMonthSpecialAmt > 0 ? `<p class="mt-6 text-sm font-bold text-indigo-600 bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-center">💡 今月は特別支出（${App.formatCurrency(tot.currentMonthSpecialAmt)}）があるため、支払いに合算されています。</p>` : ''}
-                    </div>
-                `;
             },
 
             renderHistory: function() {
