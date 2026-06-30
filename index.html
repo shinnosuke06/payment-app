@@ -628,7 +628,7 @@
             renderCategorySelectLg: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white font-bold text-gray-700">${Object.entries(CAT_LABELS).map(([k, d]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>`; },
             renderAccountSelect: function(name, val) { return `<select name="${name}" class="flex-1 px-2 py-1.5 text-sm border rounded bg-white"><option value="">口座未定</option>${App.state.accounts.map(a => `<option value="${a.id}" ${Number(val) === a.id ? 'selected' : ''}>${escapeHTML(a.name)}</option>`).join('')}</select>`; },
 
-            // --- メイン描画（安全装置を追加） ---
+            // --- メイン描画（安全装置付き） ---
             render: function() {
                 try {
                     App.calculateTotals();
@@ -752,7 +752,7 @@
                         <form onsubmit="App.addAccount(event, this)" class="bg-white p-3 rounded-lg border shadow-sm flex flex-col sm:flex-row gap-2">
                             <input name="accName" type="text" placeholder="口座名" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"/>
                             <div class="flex gap-2 w-full sm:w-auto">
-                                <input name="accAmount" type="number" placeholder="現在の金額" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"/>
+                                <input name="accAmount" type="text" placeholder="現在の金額" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"/>
                                 <button type="submit" class="px-4 py-2 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600 transition-colors flex items-center justify-center gap-1 shrink-0">${App.getIconHTML('plus', 18)} 追加</button>
                             </div>
                         </form>
@@ -807,7 +807,7 @@
                         <form onsubmit="App.addWallet(event, this)" class="bg-white p-3 rounded-lg border shadow-sm flex flex-col sm:flex-row gap-2">
                             <input name="walName" type="text" placeholder="手元現金名" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200"/>
                             <div class="flex gap-2 w-full sm:w-auto">
-                                <input name="walAmount" type="number" placeholder="現在の金額" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200"/>
+                                <input name="walAmount" type="text" placeholder="現在の金額" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200"/>
                                 <button type="submit" class="px-4 py-2 bg-amber-500 text-white font-bold rounded-lg hover:bg-amber-600 flex items-center justify-center gap-1 shrink-0 transition-colors">${App.getIconHTML('plus', 18)} 追加</button>
                             </div>
                         </form>
@@ -863,7 +863,7 @@
                         <form onsubmit="App.addIncome(event, this)" class="bg-white p-3 rounded-xl border shadow-sm flex flex-col sm:flex-row gap-2">
                             <input name="incName" type="text" placeholder="項目名" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200"/>
                             <div class="flex gap-2 w-full sm:w-auto">
-                                <input name="incAmount" type="number" placeholder="金額" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200"/>
+                                <input name="incAmount" type="text" placeholder="金額" required class="flex-1 w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-200"/>
                                 <button type="submit" class="px-4 py-2 bg-emerald-500 text-white font-bold rounded-lg hover:bg-emerald-600 flex items-center justify-center shrink-0 transition-colors">${App.getIconHTML('plus', 18)}</button>
                             </div>
                         </form>
@@ -933,7 +933,7 @@
                                             </div>
                                             <div class="flex flex-wrap items-center gap-2 text-[10px] text-gray-500 mt-1.5">
                                                 ${endDateBadge}
-                                                ${item.dueDate ? `<span class="bg-gray-50 border px-1.5 py-0.5 rounded flex items-center gap-1">${App.getIconHTML('calendar', 12, 'text-gray-400')} ${item.dueDate}日引落</span>` : ''}
+                                                ${item.dueDate ? `<span class="bg-gray-50 border px-1.5 py-0.5 rounded flex items-center gap-1">${App.getIconHTML('calendar', 12, 'text-rose-400')} ${item.dueDate}日引落</span>` : ''}
                                                 ${linkedAccount ? `<span class="bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded flex items-center gap-1 max-w-[100px] truncate">${App.getIconHTML('building-2', 12, 'shrink-0')}<span class="truncate">${escapeHTML(linkedAccount.name)}</span></span>` : '<span class="text-gray-400">口座未設定</span>'}
                                             </div>
                                             ${item.memo ? `<div class="text-[10px] text-gray-400 mt-1 flex items-start gap-1">${App.getIconHTML('message-square', 14, 'shrink-0 mt-0.5')} <span class="truncate">${escapeHTML(item.memo)}</span></div>` : ''}
@@ -1081,12 +1081,14 @@
                             `;
                         } else {
                             let monthsLeftText = '未定';
+                            let monthlyAmt = 0;
                             if (item.targetMonth) {
                                 const curDate = new Date();
                                 const [ty, tm] = item.targetMonth.split('-');
                                 let ml = (parseInt(ty) - curDate.getFullYear()) * 12 + (parseInt(tm) - (curDate.getMonth() + 1)) + 1;
                                 if (ml < 1) ml = 1;
                                 monthsLeftText = `残り ${ml}ヶ月`;
+                                monthlyAmt = Math.ceil(App.calcAmount(item.amount) / ml);
                             }
 
                             html += `
@@ -1098,7 +1100,7 @@
                                         </div>
                                         <div class="flex flex-wrap items-end gap-x-4 gap-y-1 text-sm">
                                             <div><span class="text-xs text-gray-500 block mb-0.5">目標金額</span><span class="font-black text-gray-700">${App.formatCurrency(item.amount)}</span></div>
-                                            ${!item.isDone && item.targetMonth ? `<div><span class="text-xs text-gray-500 block mb-0.5">期限</span><span class="font-bold text-rose-500">${monthsLeftText}</span></div>` : ''}
+                                            ${!item.isDone && item.targetMonth ? `<div><span class="text-xs text-gray-500 block mb-0.5">単独積立の目安 (${monthsLeftText})</span><span class="font-bold text-rose-500">${App.formatCurrency(monthlyAmt)} /月</span></div>` : ''}
                                         </div>
                                         ${item.memo ? `<div class="text-[10px] text-gray-400 mt-2 flex items-start gap-1">${App.getIconHTML('message-square', 14, 'shrink-0 mt-0.5')} <span class="truncate">${escapeHTML(item.memo)}</span></div>` : ''}
                                     </div>
@@ -1199,6 +1201,34 @@
                     </div>
                 `;
                 return html;
+            },
+
+            renderCashflow: function() {
+                const tot = App.totals;
+                const isShort = tot.activeFinalBalance < 0;
+                return `
+                    <div class="bg-white rounded-2xl p-8 shadow-md border border-gray-100 animate-zoom-in max-w-5xl mx-auto">
+                        <h2 class="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2 pb-4 border-b border-gray-100">${App.getIconHTML('layout-dashboard', 24, 'text-indigo-600')} 今月の全体キャッシュフロー予想</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div class="p-6 bg-blue-50 rounded-2xl border border-blue-100 flex flex-col justify-between">
+                                <div><p class="text-sm text-blue-600 font-bold mb-1">確保している資金</p><p class="text-xs text-blue-400 mb-4">全口座・現金 ＋ 未済の入金総額</p></div>
+                                <p class="text-3xl font-black text-blue-800">${App.formatCurrency(tot.totalAccountsNum + tot.totalWalletsNum + tot.activeAccountIncomes + tot.remainingIncomes)}</p>
+                            </div>
+                            <div class="p-6 bg-rose-50 rounded-2xl border border-rose-100 flex flex-col justify-between">
+                                <div><p class="text-sm text-rose-600 font-bold mb-1">残りの支払い合計</p><p class="text-xs text-rose-400 mb-4">未済引落・消費 ＋ 当月の特別支出</p></div>
+                                <p class="text-3xl font-black text-rose-800">${App.formatCurrency(tot.activePayments + tot.activeWalletsOutgo)}</p>
+                            </div>
+                            <div class="p-6 rounded-2xl border-2 flex flex-col justify-between ${isShort ? 'bg-red-50 border-red-300 shadow-sm' : 'bg-emerald-50 border-emerald-300 shadow-emerald-100 shadow-lg'}">
+                                <div>
+                                    <p class="text-sm font-bold flex items-center gap-1.5 mb-1 ${isShort ? 'text-red-600' : 'text-emerald-700'}">${App.getIconHTML(isShort ? 'alert-circle' : 'check-circle-2', 24)} 差引予測残高</p>
+                                    <p class="text-xs mb-4 ${isShort ? 'text-red-400' : 'text-emerald-500'}">${isShort ? '資金がショートするリスクがあります' : '引き落とし後も資金は確保できています'}</p>
+                                </div>
+                                <p class="text-4xl font-black tracking-tight ${isShort ? 'text-red-700' : 'text-emerald-700'}">${App.formatCurrency(tot.activeFinalBalance)}</p>
+                            </div>
+                        </div>
+                        ${tot.currentMonthSpecialAmt > 0 ? `<p class="mt-6 text-sm font-bold text-indigo-600 bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-center">💡 今月は特別支出（${App.formatCurrency(tot.currentMonthSpecialAmt)}）があるため、支払いに合算されています。</p>` : ''}
+                    </div>
+                `;
             },
 
             renderHistory: function() {
@@ -1496,6 +1526,13 @@
                         }
                         html += `</div>`;
                     }
+                } else {
+                    html += `
+                        <div class="bg-white rounded-2xl p-8 border-2 border-gray-100 border-dashed text-center mt-6 shadow-sm">
+                            <div class="inline-flex items-center justify-center w-12 h-12 bg-gray-50 rounded-full mb-3 text-gray-400">${App.getIconHTML('bar-chart-3', 28)}</div>
+                            <p class="text-gray-500 font-bold">グラフの棒をタップすると、ここに内訳の詳細が表示されます</p>
+                        </div>
+                    `;
                 }
 
                 html += `</div>`;
